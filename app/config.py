@@ -16,14 +16,19 @@ class Settings(BaseSettings):
     qdrant_collection: str = "tech_manuals"
     qdrant_top_k: int = 5
 
-    # Ollama
+    # Ollama (solo para generación de texto)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
-    ollama_embed_model: str = "nomic-embed-text"
     ollama_timeout: int = 120
+
+    # Embeddings (sentence-transformers — debe coincidir con rag_ingestion_service)
+    embedding_model: str = "paraphrase-multilingual-mpnet-base-v2"
+    embedding_device: str = "cpu"   # "cuda" si hay GPU disponible
+    embedding_dimensions: int = 768  # dimensiones del modelo; se valida contra Qdrant al iniciar
 
     # RAG
     max_context_chars: int = 4000
+    max_context_tokens: int = 1024  # límite de tokens del contexto para el LLM
     max_history_messages: int = 6
 
     # Query rewriting

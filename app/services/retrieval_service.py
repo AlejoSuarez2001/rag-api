@@ -23,6 +23,42 @@ class RetrievalService:
         self._collection = settings.qdrant_collection
         self._top_k = settings.qdrant_top_k
 
+    async def validate_collection_dimensions(self, expected_dim: int) -> None:
+        """
+        Validate that the Qdrant collection's vector size matches expected_dim.
+        Should be called at application startup to catch embedding mismatches early.
+        Raises RuntimeError if the dimensions don't match.
+        """
+        try:
+            info = await self._client.get_collection(self._collection)
+            vectors_config = info.config.params.vectors
+            # vectors_config may be a dict (named vectors) or a VectorsConfig object
+            if hasattr(vectors_config, "size"):
+                actual_dim = vectors_config.size
+            else:
+                # Named vectors: use the first (and typically only) entry
+                first = next(iter(vectors_config.values()))
+                actual_dim = first.size
+
+            if actual_dim != expected_dim:
+                raise RuntimeError(
+                    f"Embedding dimension mismatch en la colección '{self._collection}': "
+                    f"Qdrant tiene vectores de {actual_dim} dims, "
+                    f"pero el modelo produce {expected_dim} dims. "
+                    "Re-ingestá todos los documentos con el modelo correcto."
+                )
+            logger.info(
+                "Dimensiones validadas: colección '%s' tiene %d dims ✓",
+                self._collection,
+                actual_dim,
+            )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "No se pudo validar dimensiones de Qdrant (¿colección aún no creada?): %s", exc
+            )
+
     async def hybrid_search(
         self,
         query: str,

@@ -72,6 +72,7 @@ class RAGService:
             chunks=chunks,
             history=history.messages,
             max_context_chars=self._settings.max_context_chars,
+            max_context_tokens=self._settings.max_context_tokens,
         )
 
         # 7. Call LLM

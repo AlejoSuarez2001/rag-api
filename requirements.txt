@@ -13,9 +13,12 @@ qdrant-client==1.9.1
 # Cache / memory
 redis==5.0.4
 
-# Reranking (cross-encoder)
+# Reranking (cross-encoder) + embeddings
 sentence-transformers==3.0.1
 torch==2.3.1
+
+# Token counting
+tiktoken==0.7.0
 
 # Dev utilities
 python-dotenv==1.0.1

@@ -1,5 +1,9 @@
 from functools import lru_cache
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
+
 from app.config import Settings, get_settings
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.rag_service import RAGService
@@ -25,8 +29,28 @@ async def chat(
             conversation_id=request.conversation_id,
             question=request.question,
         )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Input inválido: {exc}",
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Timeout esperando respuesta del servicio upstream (LLM/Qdrant).",
+        ) from exc
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo conectar a un servicio upstream (LLM o Qdrant).",
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error del servicio upstream: HTTP {exc.response.status_code}.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"RAG pipeline error: {exc}",
+            detail=f"Error en el pipeline RAG: {exc}",
         ) from exc
