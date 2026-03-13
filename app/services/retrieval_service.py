@@ -5,6 +5,7 @@ from qdrant_client.models import (
     Filter,
     FieldCondition,
     MatchText,
+    MatchValue,
 )
 from app.config import Settings
 from app.models.schemas import RetrievedChunk
@@ -100,6 +101,30 @@ class RetrievalService:
 
         return self._multi_rrf(per_query_results, limit)
 
+    async def fetch_section_chunks(
+        self,
+        *,
+        source: str,
+        title: str,
+    ) -> list[RetrievedChunk]:
+        section_filter = Filter(
+            must=[
+                FieldCondition(key="source", match=MatchValue(value=source)),
+                FieldCondition(key="title", match=MatchValue(value=title)),
+            ]
+        )
+        results = await self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=section_filter,
+            limit=32,
+            with_payload=True,
+            with_vectors=False,
+        )
+        points, _ = results
+        chunks = [self._point_to_chunk(point, score=0.0) for point in points]
+        chunks.sort(key=lambda chunk: (chunk.position is None, chunk.position or 0))
+        return chunks
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -137,12 +162,7 @@ class RetrievalService:
         )
         points, _ = results
         return [
-            RetrievedChunk(
-                text=p.payload.get("text", ""),
-                source=p.payload.get("source", "unknown"),
-                score=0.5,  # keyword matches get a base score
-                chunk_id=str(p.id),
-            )
+            self._point_to_chunk(p, score=0.5)  # keyword matches get a base score
             for p in points
         ]
 
@@ -183,7 +203,21 @@ class RetrievalService:
             text=payload.get("text", ""),
             source=payload.get("source", "unknown"),
             score=result.score,
-            chunk_id=str(result.id),
+            chunk_id=payload.get("chunk_id", str(result.id)),
+            title=payload.get("title"),
+            position=payload.get("position"),
+        )
+
+    @staticmethod
+    def _point_to_chunk(point, score: float) -> RetrievedChunk:
+        payload = point.payload or {}
+        return RetrievedChunk(
+            text=payload.get("text", ""),
+            source=payload.get("source", "unknown"),
+            score=score,
+            chunk_id=payload.get("chunk_id", str(point.id)),
+            title=payload.get("title"),
+            position=payload.get("position"),
         )
 
     def _multi_rrf(

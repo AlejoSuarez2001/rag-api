@@ -20,6 +20,14 @@ async def lifespan(app: FastAPI):
 
 settings = get_settings()
 
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.DEBUG if settings.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+logging.getLogger("app").setLevel(logging.DEBUG if settings.debug else logging.INFO)
+
 app = FastAPI(
     title=settings.app_name,
     description="Hybrid RAG API for technical support manuals",

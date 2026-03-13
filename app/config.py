@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768  # dimensiones del modelo; se valida contra Qdrant al iniciar
 
     # RAG
-    max_context_chars: int = 4000
-    max_context_tokens: int = 1024  # límite de tokens del contexto para el LLM
+    max_context_chars: int = 12000
+    max_context_tokens: int = 3000  # límite de tokens del contexto para el LLM
     max_history_messages: int = 6
 
     # Query rewriting

@@ -27,3 +27,5 @@ class RetrievedChunk(BaseModel):
     source: str
     score: float
     chunk_id: Optional[str] = None
+    title: Optional[str] = None
+    position: Optional[int] = None

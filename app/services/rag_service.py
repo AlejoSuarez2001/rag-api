@@ -69,6 +69,23 @@ class RAGService:
             logger.info("Reranked to %d chunks", len(chunks))
         else:
             chunks = candidates[: self._settings.reranker_top_k]
+        chunks = await self._expand_section_chunks(
+            selected_chunks=chunks,
+            max_chunks=self._settings.reranker_top_k,
+        )
+
+        logger.info(
+            "Selected chunks for final prompt: %s",
+            [
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "title": chunk.title,
+                    "source": chunk.source,
+                    "score": chunk.score,
+                }
+                for chunk in chunks
+            ],
+        )
 
         # 6. Build prompt
         prompt = build_prompt(
@@ -78,10 +95,10 @@ class RAGService:
             max_context_chars=self._settings.max_context_chars,
             max_context_tokens=self._settings.max_context_tokens,
         )
-        logger.info("Final prompt sent to LLM:\n%s", prompt)
+        logger.info("Final answer prompt built (%d chars)", len(prompt))
 
         # 7. Call LLM
-        answer = await self._llm.generate(prompt)
+        answer = await self._llm.generate(prompt, log_request=True)
 
         # 8. Persist turn to Redis
         await self._memory.add_turn(
@@ -101,3 +118,64 @@ class RAGService:
         min_score: float = 0.001,
     ) -> list[RetrievedChunk]:
         return [c for c in chunks if c.score >= min_score and c.text.strip()]
+
+    async def _expand_section_chunks(
+        self,
+        selected_chunks: list[RetrievedChunk],
+        max_chunks: int,
+    ) -> list[RetrievedChunk]:
+        if max_chunks <= 1:
+            return selected_chunks[:max_chunks]
+
+        result: list[RetrievedChunk] = []
+        used_chunk_ids: set[str] = set()
+
+        for chunk in selected_chunks:
+            if len(result) >= max_chunks:
+                break
+
+            chunk_key = chunk.chunk_id
+            if chunk_key and chunk_key not in used_chunk_ids:
+                result.append(chunk)
+                used_chunk_ids.add(chunk_key)
+
+            if len(result) >= max_chunks or not chunk.source or not chunk.title:
+                continue
+
+            section_chunks = await self._retrieval.fetch_section_chunks(
+                source=chunk.source,
+                title=chunk.title,
+            )
+            companions = self._order_section_companions(chunk, section_chunks, used_chunk_ids)
+            for companion in companions:
+                if len(result) >= max_chunks:
+                    break
+                result.append(companion)
+                if companion.chunk_id:
+                    used_chunk_ids.add(companion.chunk_id)
+
+        return result
+
+    @staticmethod
+    def _order_section_companions(
+        chunk: RetrievedChunk,
+        section_chunks: list[RetrievedChunk],
+        used_chunk_ids: set[str],
+    ) -> list[RetrievedChunk]:
+        companions = [
+            section_chunk
+            for section_chunk in section_chunks
+            if section_chunk.chunk_id
+            and section_chunk.chunk_id not in used_chunk_ids
+            and section_chunk.chunk_id != chunk.chunk_id
+        ]
+        if not companions:
+            return []
+
+        def companion_sort_key(candidate: RetrievedChunk) -> tuple[int, int, float]:
+            if chunk.position is not None and candidate.position is not None:
+                return (0, abs(candidate.position - chunk.position), -candidate.score)
+            return (1, 0, -candidate.score)
+
+        companions.sort(key=companion_sort_key)
+        return companions

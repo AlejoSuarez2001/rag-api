@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import threading
 from typing import ClassVar
@@ -25,16 +26,23 @@ class LLMService:
         self._embed_device = settings.embedding_device
         self._timeout = settings.ollama_timeout
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, *, log_request: bool = False) -> str:
         """Send a prompt to Ollama and return the generated text."""
+        payload = {
+            "model": self._model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        if log_request:
+            logger.info(
+                "Final Ollama generate payload:\n%s",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
                 f"{self._base_url}/api/generate",
-                json={
-                    "model": self._model,
-                    "prompt": prompt,
-                    "stream": False,
-                },
+                json=payload,
             )
             response.raise_for_status()
             return response.json()["response"]

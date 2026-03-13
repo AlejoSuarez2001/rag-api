@@ -34,8 +34,8 @@ def build_prompt(
     question: str,
     chunks: list[RetrievedChunk],
     history: list[Message],
-    max_context_chars: int = 4000,
-    max_context_tokens: int = 1024,
+    max_context_chars: int = 12000,
+    max_context_tokens: int = 3000,
 ) -> str:
     context = _build_context(chunks, max_context_chars, max_context_tokens)
     history_text = _build_history(history)
