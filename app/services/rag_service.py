@@ -22,7 +22,11 @@ class RAGService:
         self._memory = RedisMemory(settings)
         self._rewriter = QueryRewriter(self._llm, settings.query_expansion_count)
         self._reranker = (
-            Reranker(settings.reranker_model, settings.reranker_top_k)
+            Reranker(
+                settings.reranker_model,
+                settings.reranker_device,
+                settings.reranker_top_k,
+            )
             if settings.reranker_enabled
             else None
         )
@@ -74,6 +78,7 @@ class RAGService:
             max_context_chars=self._settings.max_context_chars,
             max_context_tokens=self._settings.max_context_tokens,
         )
+        logger.info("Final prompt sent to LLM:\n%s", prompt)
 
         # 7. Call LLM
         answer = await self._llm.generate(prompt)

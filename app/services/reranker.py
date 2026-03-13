@@ -17,8 +17,9 @@ class Reranker:
     _model: ClassVar = None
     _lock: ClassVar = threading.Lock()
 
-    def __init__(self, model_name: str, top_k: int) -> None:
+    def __init__(self, model_name: str, device: str, top_k: int) -> None:
         self._model_name = model_name
+        self._device = device
         self._top_k = top_k
 
     # ------------------------------------------------------------------
@@ -66,9 +67,13 @@ class Reranker:
         if Reranker._model is None:
             with Reranker._lock:
                 if Reranker._model is None:
-                    logger.info("Loading cross-encoder model: %s", self._model_name)
+                    logger.info(
+                        "Loading cross-encoder model: %s on device %s",
+                        self._model_name,
+                        self._device,
+                    )
                     from sentence_transformers import CrossEncoder  # lazy import
 
-                    Reranker._model = CrossEncoder(self._model_name)
+                    Reranker._model = CrossEncoder(self._model_name, device=self._device)
                     logger.info("Cross-encoder model loaded successfully")
         return Reranker._model

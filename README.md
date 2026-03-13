@@ -37,19 +37,23 @@ app/
 ## Requisitos previos
 
 - Docker & Docker Compose
-- Ollama corriendo localmente con los modelos descargados:
+- NVIDIA Container Toolkit instalado si `rag-api` va a correr con GPU dentro de Docker
+- Ollama corriendo con acceso a GPU y con los modelos descargados:
   ```bash
   ollama pull llama3
-  ollama pull nomic-embed-text
   ```
 - Colección `tech_manuals` ya cargada en Qdrant con índice de texto en el campo `text`
 
 ## Inicio rápido
 
 ```bash
+# 0. Crear la red compartida para que rag-api vea a qdrant aunque estén en composes distintos
+docker network create rag-shared
+
 # 1. Clonar y configurar
 cp .env.example .env
-# Editar .env según tu entorno
+# Qdrant se resuelve por la red Docker compartida como `qdrant`.
+# Ollama, si corre fuera de Docker, se consume vía host.docker.internal.
 
 # 2. Levantar servicios con Docker Compose
 docker compose up -d
@@ -57,6 +61,29 @@ docker compose up -d
 # 3. Verificar que todo esté listo
 curl http://localhost:8000/api/v1/health/ready
 ```
+
+## Ejecucion con GPU
+
+`rag-api` usa GPU para:
+
+- embeddings locales (`EMBEDDING_DEVICE=cuda`)
+- reranking (`RERANKER_DEVICE=cuda`)
+
+El `docker-compose.yml` ya solicita acceso a NVIDIA para el contenedor `api`. Antes de levantarlo, verificá que Docker vea la GPU:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.3.2-base-ubuntu22.04 nvidia-smi
+```
+
+Ollama no corre dentro de este compose. Si querés generación en GPU, el proceso o contenedor de Ollama también tiene que estar levantado con acceso a NVIDIA y accesible desde `OLLAMA_BASE_URL`.
+
+## Red compartida con Qdrant
+
+Si `rag-api` y `rag_ingestion_service` corren en composes distintos, ambos deben compartir la red externa `rag-shared`.
+
+- `rag-api` se conecta a esa red con el servicio `api`
+- `rag_ingestion_service` expone `qdrant` en esa misma red
+- desde `rag-api`, el host a usar es `QDRANT_HOST=qdrant`
 
 ## Uso de la API
 
@@ -95,6 +122,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
+# Para desarrollo fuera de Docker, ajustá:
+# REDIS_HOST=localhost
+# QDRANT_HOST=localhost
+# OLLAMA_BASE_URL=http://localhost:11434
 uvicorn app.main:app --reload
 ```
 
@@ -105,7 +136,9 @@ uvicorn app.main:app --reload
 | `QDRANT_COLLECTION` | `tech_manuals` | Nombre de la colección en Qdrant |
 | `QDRANT_TOP_K` | `5` | Chunks a recuperar por búsqueda |
 | `OLLAMA_MODEL` | `llama3` | Modelo de generación |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Modelo de embeddings |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL de Ollama vista desde el contenedor `api` |
+| `EMBEDDING_DEVICE` | `cuda` | Device para embeddings locales |
+| `RERANKER_DEVICE` | `cuda` | Device para el cross-encoder de reranking |
 | `MAX_CONTEXT_CHARS` | `4000` | Límite de caracteres en el contexto |
 | `MAX_HISTORY_MESSAGES` | `6` | Turnos de historial a incluir |
 | `REDIS_TTL_SECONDS` | `3600` | TTL de sesiones en Redis |
