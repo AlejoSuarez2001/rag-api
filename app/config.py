@@ -3,6 +3,11 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    # Auth / Keycloak
+    auth_certs: str = ""
+    auth_server_issuer: str = ""
+    keycloak_clientid: str = "api-rag"
+
     # Redis
     redis_host: str = "redis"
     redis_port: int = 6379

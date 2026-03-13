@@ -8,6 +8,7 @@ Backend para responder preguntas sobre manuales de soporte técnico usando Hybri
 |---|---|
 | API | FastAPI |
 | Validación | Pydantic v2 |
+| Auth | JWT Bearer + JWKS |
 | Historial | Redis |
 | Vector DB | Qdrant |
 | LLM / Embeddings | Ollama |
@@ -43,6 +44,10 @@ app/
   ollama pull llama3
   ```
 - Colección `tech_manuals` ya cargada en Qdrant con índice de texto en el campo `text`
+- Configurar autenticación JWT:
+  - `AUTH_CERTS`: URL del JWKS
+  - `AUTH_SERVER_ISSUER`: issuer esperado del token
+  - `KEYCLOAK_CLIENTID`: cliente cuyos roles se validan (default `api-rag`)
 
 ## Inicio rápido
 
@@ -54,6 +59,7 @@ docker network create rag-shared
 cp .env.example .env
 # Qdrant se resuelve por la red Docker compartida como `qdrant`.
 # Ollama, si corre fuera de Docker, se consume vía host.docker.internal.
+# Completar AUTH_CERTS y AUTH_SERVER_ISSUER para habilitar JWT.
 
 # 2. Levantar servicios con Docker Compose
 docker compose up -d
@@ -87,10 +93,16 @@ Si `rag-api` y `rag_ingestion_service` corren en composes distintos, ambos deben
 
 ## Uso de la API
 
+Todas las rutas bajo `/api/v1` requieren un JWT Bearer válido.
+
+- `/api/v1/chat` exige `ROLE_CHATEAR_RAG`
+- `/api/v1/health` y `/api/v1/health/ready` exigen `ROLE_CHECK_RAG`
+
 ### POST /api/v1/chat
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Authorization: Bearer <jwt>" \
   -H "Content-Type: application/json" \
   -d '{
     "conversation_id": "user-session-001",
@@ -109,6 +121,11 @@ curl -X POST http://localhost:8000/api/v1/chat \
 ### GET /api/v1/health/ready
 
 Verifica conectividad con Redis, Qdrant y Ollama.
+
+```bash
+curl http://localhost:8000/api/v1/health/ready \
+  -H "Authorization: Bearer <jwt>"
+```
 
 ## Documentación interactiva
 
@@ -137,6 +154,9 @@ uvicorn app.main:app --reload
 | `QDRANT_TOP_K` | `5` | Chunks a recuperar por búsqueda |
 | `OLLAMA_MODEL` | `llama3` | Modelo de generación |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL de Ollama vista desde el contenedor `api` |
+| `AUTH_CERTS` | vacío | URL del JWKS para validar JWT |
+| `AUTH_SERVER_ISSUER` | vacío | Issuer esperado del JWT |
+| `KEYCLOAK_CLIENTID` | `api-rag` | Cliente dentro de `resource_access` desde donde se leen los roles |
 | `EMBEDDING_DEVICE` | `cpu` | Device para embeddings locales |
 | `RERANKER_DEVICE` | `cpu` | Device para el cross-encoder de reranking |
 | `MAX_CONTEXT_CHARS` | `4000` | Límite de caracteres en el contexto |

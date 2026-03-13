@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Depends
 from app.config import Settings, get_settings
+from app.security import require_health_role
 from app.services.llm_service import LLMService
 from app.services.redis_memory import RedisMemory
 from app.services.retrieval_service import RetrievalService
 
-router = APIRouter(prefix="/health", tags=["Health"])
+router = APIRouter(
+    prefix="/health",
+    tags=["Health"],
+    dependencies=[Depends(require_health_role)],
+)
 
 
 @router.get("", summary="Liveness check")

@@ -6,9 +6,14 @@ from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.models.schemas import ChatRequest, ChatResponse
+from app.security import require_chat_role
 from app.services.rag_service import RAGService
 
-router = APIRouter(prefix="/chat", tags=["Chat"])
+router = APIRouter(
+    prefix="/chat",
+    tags=["Chat"],
+    dependencies=[Depends(require_chat_role)],
+)
 
 
 def get_rag_service(settings: Settings = Depends(get_settings)) -> RAGService:
