@@ -7,7 +7,7 @@ from app.services.query_rewriter import QueryRewriter
 from app.services.reranker import Reranker
 from app.services.redis_memory import RedisMemory
 from app.services.retrieval_service import RetrievalService
-from app.utils.prompt_builder import build_prompt
+from app.services.prompt_builder import build_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ class RAGService:
             search_queries = await self._rewriter.expand_queries(standalone_query)
             logger.info("Expanded to %d queries", len(search_queries))
 
+        logger.info("Queries sent to embedding model: %s", search_queries)
         embeddings = await asyncio.gather(
             *[self._llm.embed(q) for q in search_queries]
         )

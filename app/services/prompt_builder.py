@@ -1,4 +1,5 @@
 import logging
+import re
 
 import tiktoken
 
@@ -18,6 +19,14 @@ Reglas:
 """
 
 _ENCODING_NAME = "cl100k_base"
+_IMAGE_FILENAME_PATTERN = re.compile(
+    r"^\s*image-[\w-]+\.(?:png|jpg|jpeg|gif|webp)(?:\s*\(([^)]+)\))?:?\s*$",
+    re.IGNORECASE,
+)
+_LEGACY_IMAGE_MARKER_PATTERN = re.compile(
+    r"\[\s*Imagen referenciada en esta sección\s*\]",
+    re.IGNORECASE,
+)
 
 
 def count_tokens(text: str) -> int:
@@ -67,7 +76,8 @@ def _build_context(
     total_tokens = 0
 
     for i, chunk in enumerate(chunks, start=1):
-        entry = f"[Fragmento {i} - {chunk.source}]\n{chunk.text}"
+        sanitized_text = _sanitize_chunk_text(chunk.text)
+        entry = f"[Fragmento {i} - {chunk.source}]\n{sanitized_text}"
         entry_tokens = count_tokens(entry)
 
         if total_chars + len(entry) > max_chars:
@@ -94,3 +104,31 @@ def _build_history(messages: list[Message]) -> str:
         f"{'Usuario' if m.role == 'user' else 'Asistente'}: {m.content}"
         for m in messages
     )
+
+
+def _sanitize_chunk_text(text: str) -> str:
+    normalized = _LEGACY_IMAGE_MARKER_PATTERN.sub(
+        "[Imagen de referencia en esta sección]",
+        text,
+    )
+
+    sanitized_lines: list[str] = []
+    previous_line = ""
+    for raw_line in normalized.splitlines():
+        line = raw_line.strip()
+        match = _IMAGE_FILENAME_PATTERN.match(line)
+        if match:
+            description = match.group(1)
+            line = (
+                f"[Imagen de referencia: {description}]"
+                if description
+                else "[Imagen de referencia en esta sección]"
+            )
+
+        if line and line == previous_line and line.startswith("[Imagen de referencia"):
+            continue
+
+        sanitized_lines.append(line if line else "")
+        previous_line = line
+
+    return "\n".join(sanitized_lines).strip()

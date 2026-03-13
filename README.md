@@ -66,8 +66,8 @@ curl http://localhost:8000/api/v1/health/ready
 
 `rag-api` usa GPU para:
 
-- embeddings locales (`EMBEDDING_DEVICE=cuda`)
-- reranking (`RERANKER_DEVICE=cuda`)
+- embeddings locales (`EMBEDDING_DEVICE=cpu` por defecto para ahorrar VRAM)
+- reranking (`RERANKER_DEVICE=cpu` por defecto para ahorrar VRAM)
 
 El `docker-compose.yml` ya solicita acceso a NVIDIA para el contenedor `api`. Antes de levantarlo, verificá que Docker vea la GPU:
 
@@ -137,8 +137,8 @@ uvicorn app.main:app --reload
 | `QDRANT_TOP_K` | `5` | Chunks a recuperar por búsqueda |
 | `OLLAMA_MODEL` | `llama3` | Modelo de generación |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL de Ollama vista desde el contenedor `api` |
-| `EMBEDDING_DEVICE` | `cuda` | Device para embeddings locales |
-| `RERANKER_DEVICE` | `cuda` | Device para el cross-encoder de reranking |
+| `EMBEDDING_DEVICE` | `cpu` | Device para embeddings locales |
+| `RERANKER_DEVICE` | `cpu` | Device para el cross-encoder de reranking |
 | `MAX_CONTEXT_CHARS` | `4000` | Límite de caracteres en el contexto |
 | `MAX_HISTORY_MESSAGES` | `6` | Turnos de historial a incluir |
 | `REDIS_TTL_SECONDS` | `3600` | TTL de sesiones en Redis |

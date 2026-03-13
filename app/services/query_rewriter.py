@@ -49,7 +49,11 @@ class QueryRewriter:
         try:
             rewritten = await self._llm.generate(prompt)
             rewritten = rewritten.strip().strip('"').strip("'")
-            logger.debug("Standalone rewrite: %r → %r", question, rewritten)
+            logger.info(
+                "Ollama rewrote user query before embedding: original=%r rewritten=%r",
+                question,
+                rewritten,
+            )
             return rewritten or question
         except Exception:
             logger.warning("Query rewrite failed, using original query", exc_info=True)
