@@ -28,8 +28,12 @@ class RedisMemory:
         conversation_id: str,
         question: str,
         answer: str,
+        username: str | None = None,
     ) -> None:
         history = await self.get_history(conversation_id)
+
+        if username and not history.username:
+            history.username = username
 
         history.messages.append(Message(role="user", content=question))
         history.messages.append(Message(role="assistant", content=answer))
@@ -43,6 +47,15 @@ class RedisMemory:
             history.model_dump_json(),
         )
 
+        if username:
+            user_key = self._user_key(username)
+            await self._client.sadd(user_key, conversation_id)
+            await self._client.expire(user_key, self._ttl)
+
+    async def get_user_conversations(self, username: str) -> list[str]:
+        members = await self._client.smembers(self._user_key(username))
+        return list(members)
+
     async def clear(self, conversation_id: str) -> None:
         await self._client.delete(self._key(conversation_id))
 
@@ -55,3 +68,7 @@ class RedisMemory:
     @staticmethod
     def _key(conversation_id: str) -> str:
         return f"rag:conv:{conversation_id}"
+
+    @staticmethod
+    def _user_key(username: str) -> str:
+        return f"rag:user:{username}:convs"

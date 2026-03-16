@@ -19,7 +19,17 @@ class Message(BaseModel):
 
 class ConversationHistory(BaseModel):
     conversation_id: str
+    username: Optional[str] = None
     messages: list[Message] = Field(default_factory=list)
+
+
+class ConversationSummary(BaseModel):
+    conversation_id: str
+    preview: str | None = None
+
+class ConversationListResponse(BaseModel):
+    username: str
+    conversations: list[ConversationSummary]
 
 
 class RetrievedChunk(BaseModel):

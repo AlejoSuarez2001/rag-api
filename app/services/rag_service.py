@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from app.config import Settings
 from app.models.schemas import ChatResponse, ConversationHistory, RetrievedChunk
 from app.services.llm_service import LLMService
@@ -31,7 +33,7 @@ class RAGService:
             else None
         )
 
-    async def chat(self, conversation_id: str, question: str) -> ChatResponse:
+    async def chat(self, conversation_id: str, question: str, username: str | None = None) -> ChatResponse:
         # 1. Retrieve conversation history
         history = await self._memory.get_history(conversation_id)
 
@@ -106,12 +108,69 @@ class RAGService:
             conversation_id=conversation_id,
             question=question,
             answer=answer,
+            username=username,
         )
 
         # 9. Collect unique sources
         sources = list(dict.fromkeys(c.source for c in chunks))
 
         return ChatResponse(answer=answer, sources=sources)
+
+    async def chat_stream(
+        self, conversation_id: str, question: str, username: str | None = None
+    ) -> AsyncIterator[str]:
+        """Same pipeline as chat() but streams the LLM response token by token via SSE."""
+        history = await self._memory.get_history(conversation_id)
+
+        standalone_query = question
+        if self._settings.query_rewrite_enabled:
+            standalone_query = await self._rewriter.rewrite_standalone(
+                question=question, history=history.messages
+            )
+
+        search_queries = [standalone_query]
+        if self._settings.query_expansion_enabled:
+            search_queries = await self._rewriter.expand_queries(standalone_query)
+
+        embeddings = await asyncio.gather(*[self._llm.embed(q) for q in search_queries])
+
+        candidates = await self._retrieval.multi_query_hybrid_search(
+            queries=search_queries,
+            embeddings=list(embeddings),
+            top_k=self._settings.retrieval_candidates,
+        )
+        candidates = self._filter_chunks(candidates)
+
+        if self._reranker and candidates:
+            chunks = self._reranker.rerank(standalone_query, candidates)
+        else:
+            chunks = candidates[: self._settings.reranker_top_k]
+        chunks = await self._expand_section_chunks(
+            selected_chunks=chunks, max_chunks=self._settings.reranker_top_k
+        )
+
+        prompt = build_prompt(
+            question=question,
+            chunks=chunks,
+            history=history.messages,
+            max_context_chars=self._settings.max_context_chars,
+            max_context_tokens=self._settings.max_context_tokens,
+        )
+
+        full_answer = ""
+        async for token in self._llm.generate_stream(prompt, log_request=True):
+            full_answer += token
+            yield f"data: {json.dumps({'token': token})}\n\n"
+
+        await self._memory.add_turn(
+            conversation_id=conversation_id,
+            question=question,
+            answer=full_answer,
+            username=username,
+        )
+
+        sources = list(dict.fromkeys(c.source for c in chunks))
+        yield f"data: {json.dumps({'done': True, 'sources': sources})}\n\n"
 
     def _filter_chunks(
         self,

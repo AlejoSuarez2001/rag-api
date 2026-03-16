@@ -1,3 +1,3 @@
-from app.security.auth import require_chat_role, require_health_role
+from app.security.auth import get_current_token_payload
 
-__all__ = ["require_chat_role", "require_health_role"]
+__all__ = ["get_current_token_payload"]

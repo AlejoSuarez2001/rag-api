@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+from collections.abc import AsyncIterator
 from typing import ClassVar
 
 import httpx
@@ -46,6 +47,25 @@ class LLMService:
             )
             response.raise_for_status()
             return response.json()["response"]
+
+    async def generate_stream(self, prompt: str, *, log_request: bool = False) -> AsyncIterator[str]:
+        """Stream tokens from Ollama one by one."""
+        payload = {"model": self._model, "prompt": prompt, "stream": True}
+        if log_request:
+            logger.info(
+                "Final Ollama generate payload:\n%s",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with client.stream("POST", f"{self._base_url}/api/generate", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line:
+                        data = json.loads(line)
+                        if token := data.get("response"):
+                            yield token
+                        if data.get("done"):
+                            break
 
     async def embed(self, text: str) -> list[float]:
         """

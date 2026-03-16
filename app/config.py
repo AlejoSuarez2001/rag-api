@@ -4,9 +4,9 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Auth / Keycloak
-    auth_certs: str = ""
-    auth_server_issuer: str = ""
-    keycloak_clientid: str = "api-rag"
+    auth_certs: str = "https://auth-dev.frba.utn.edu.ar/realms/frba/protocol/openid-connect/certs"
+    auth_server_issuer: str = "https://auth-dev.frba.utn.edu.ar/realms/frba"
+    auth_verify_ssl: bool = False
 
     # Redis
     redis_host: str = "redis"
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     redis_ttl_seconds: int = 3600
 
     # Qdrant
-    qdrant_host: str = "qdrant"
+    qdrant_host: str = "qdrant-rag"
     qdrant_port: int = 6333
     qdrant_collection: str = "tech_manuals"
     qdrant_top_k: int = 5

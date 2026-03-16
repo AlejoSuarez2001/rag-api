@@ -1,4 +1,5 @@
 import logging
+import ssl
 from functools import lru_cache
 from typing import Any
 
@@ -15,8 +16,12 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @lru_cache(maxsize=8)
-def _get_jwk_client(jwks_uri: str) -> PyJWKClient:
-    return PyJWKClient(jwks_uri)
+def _get_jwk_client(jwks_uri: str, verify_ssl: bool = True) -> PyJWKClient:
+    ssl_context = None if verify_ssl else ssl.create_default_context()
+    if ssl_context is not None:
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+    return PyJWKClient(jwks_uri, ssl_context=ssl_context)
 
 
 def _ensure_auth_config(settings: Settings) -> None:
@@ -25,7 +30,6 @@ def _ensure_auth_config(settings: Settings) -> None:
         for name, value in (
             ("auth_certs", settings.auth_certs),
             ("auth_server_issuer", settings.auth_server_issuer),
-            ("keycloak_clientid", settings.keycloak_clientid),
         )
         if not value
     ]
@@ -53,7 +57,7 @@ async def get_current_token_payload(
     token = credentials.credentials
 
     try:
-        signing_key = _get_jwk_client(settings.auth_certs).get_signing_key_from_jwt(token)
+        signing_key = _get_jwk_client(settings.auth_certs, settings.auth_verify_ssl).get_signing_key_from_jwt(token)
         payload = jwt.decode(
             token,
             signing_key.key,
@@ -76,29 +80,3 @@ async def get_current_token_payload(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno al validar token JWT: {exc}",
         ) from exc
-
-
-def require_client_roles(*allowed_roles: str):
-    async def dependency(
-        payload: dict[str, Any] = Depends(get_current_token_payload),
-        settings: Settings = Depends(get_settings),
-    ) -> dict[str, Any]:
-        client_roles = (
-            payload.get("resource_access", {})
-            .get(settings.keycloak_clientid, {})
-            .get("roles", [])
-        )
-
-        if not any(role in client_roles for role in allowed_roles):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No tienes permisos para acceder a este recurso.",
-            )
-
-        return payload
-
-    return dependency
-
-
-require_chat_role = require_client_roles("ROLE_CHATEAR_RAG")
-require_health_role = require_client_roles("ROLE_CHECK_RAG")

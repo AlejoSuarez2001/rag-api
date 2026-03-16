@@ -100,9 +100,10 @@ def _build_context(
 def _build_history(messages: list[Message]) -> str:
     if not messages:
         return ""
+    last_exchange = messages[-2:]
     return "\n".join(
         f"{'Usuario' if m.role == 'user' else 'Asistente'}: {m.content}"
-        for m in messages
+        for m in last_exchange
     )
 
 
