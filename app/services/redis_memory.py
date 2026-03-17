@@ -29,6 +29,7 @@ class RedisMemory:
         question: str,
         answer: str,
         username: str | None = None,
+        sources: list[str] | None = None,
     ) -> None:
         history = await self.get_history(conversation_id)
 
@@ -36,7 +37,7 @@ class RedisMemory:
             history.username = username
 
         history.messages.append(Message(role="user", content=question))
-        history.messages.append(Message(role="assistant", content=answer))
+        history.messages.append(Message(role="assistant", content=answer, sources=sources or []))
 
         # Keep only the last N messages to avoid token bloat
         history.messages = history.messages[-self._max_messages :]

@@ -6,16 +6,22 @@ from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
-_STANDALONE_PROMPT = """Dado el historial de conversación y la pregunta del usuario, \
-reformula la pregunta como una consulta de búsqueda autónoma y clara, sin pronombres \
-ni referencias implícitas al historial. Si la pregunta ya es independiente, devuélvela tal cual.
+_STANDALONE_PROMPT = """Tu única tarea es resolver referencias implícitas al historial de conversación \
+(pronombres como "eso", "lo mismo", "el anterior", "esa opción", etc.) en la pregunta del usuario.
+
+REGLAS ESTRICTAS:
+- Si la pregunta NO tiene referencias implícitas al historial, devuélvela EXACTAMENTE igual, sin cambiar ninguna palabra.
+- Si tiene referencias, reemplaza SOLO esas referencias con el término concreto al que apuntan en el historial.
+- NO agregues palabras, contexto, institución, ni información que no esté en la pregunta original.
+- NO mejores, reformules ni expandas la pregunta.
+- NO cambies el verbo ni la intención de la pregunta.
 
 Historial:
 {history}
 
 Pregunta original: {question}
 
-Responde ÚNICAMENTE con la pregunta reformulada, sin explicaciones."""
+Responde ÚNICAMENTE con la pregunta resultante, sin explicaciones ni comillas."""
 
 _EXPANSION_PROMPT = """Eres un motor de búsqueda técnica. Genera {n} variantes de búsqueda \
 distintas para encontrar información relevante sobre la siguiente consulta en una base de \

@@ -15,6 +15,7 @@ class ChatResponse(BaseModel):
 class Message(BaseModel):
     role: str  # "user" | "assistant"
     content: str
+    sources: list[str] = Field(default_factory=list)
 
 
 class ConversationHistory(BaseModel):

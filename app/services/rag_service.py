@@ -2,6 +2,9 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+
+import httpx
+from pydantic import ValidationError
 from app.config import Settings
 from app.models.schemas import ChatResponse, ConversationHistory, RetrievedChunk
 from app.services.llm_service import LLMService
@@ -103,16 +106,17 @@ class RAGService:
         # 7. Call LLM
         answer = await self._llm.generate(prompt, log_request=True)
 
-        # 8. Persist turn to Redis
+        # 8. Collect unique sources
+        sources = list(dict.fromkeys(c.source for c in chunks))
+
+        # 9. Persist turn to Redis
         await self._memory.add_turn(
             conversation_id=conversation_id,
             question=question,
             answer=answer,
             username=username,
+            sources=sources,
         )
-
-        # 9. Collect unique sources
-        sources = list(dict.fromkeys(c.source for c in chunks))
 
         return ChatResponse(answer=answer, sources=sources)
 
@@ -120,64 +124,78 @@ class RAGService:
         self, conversation_id: str, question: str, username: str | None = None
     ) -> AsyncIterator[str]:
         """Same pipeline as chat() but streams the LLM response token by token via SSE."""
-        history = await self._memory.get_history(conversation_id)
+        try:
+            history = await self._memory.get_history(conversation_id)
 
-        standalone_query = question
-        if self._settings.query_rewrite_enabled:
-            standalone_query = await self._rewriter.rewrite_standalone(
-                question=question, history=history.messages
+            standalone_query = question
+            if self._settings.query_rewrite_enabled:
+                standalone_query = await self._rewriter.rewrite_standalone(
+                    question=question, history=history.messages
+                )
+
+            search_queries = [standalone_query]
+            if self._settings.query_expansion_enabled:
+                search_queries = await self._rewriter.expand_queries(standalone_query)
+
+            embeddings = await asyncio.gather(*[self._llm.embed(q) for q in search_queries])
+
+            candidates = await self._retrieval.multi_query_hybrid_search(
+                queries=search_queries,
+                embeddings=list(embeddings),
+                top_k=self._settings.retrieval_candidates,
+            )
+            candidates = self._filter_chunks(candidates)
+
+            if self._reranker and candidates:
+                chunks = self._reranker.rerank(standalone_query, candidates)
+            else:
+                chunks = candidates[: self._settings.reranker_top_k]
+            chunks = await self._expand_section_chunks(
+                selected_chunks=chunks, max_chunks=self._settings.reranker_top_k
             )
 
-        search_queries = [standalone_query]
-        if self._settings.query_expansion_enabled:
-            search_queries = await self._rewriter.expand_queries(standalone_query)
+            prompt = build_prompt(
+                question=question,
+                chunks=chunks,
+                history=history.messages,
+                max_context_chars=self._settings.max_context_chars,
+                max_context_tokens=self._settings.max_context_tokens,
+            )
 
-        embeddings = await asyncio.gather(*[self._llm.embed(q) for q in search_queries])
+            full_answer = ""
+            async for token in self._llm.generate_stream(prompt, log_request=True):
+                full_answer += token
+                yield f"data: {json.dumps({'token': token})}\n\n"
 
-        candidates = await self._retrieval.multi_query_hybrid_search(
-            queries=search_queries,
-            embeddings=list(embeddings),
-            top_k=self._settings.retrieval_candidates,
-        )
-        candidates = self._filter_chunks(candidates)
+            sources = list(dict.fromkeys(c.source for c in chunks))
+            await self._memory.add_turn(
+                conversation_id=conversation_id,
+                question=question,
+                answer=full_answer,
+                username=username,
+                sources=sources,
+            )
 
-        if self._reranker and candidates:
-            chunks = self._reranker.rerank(standalone_query, candidates)
-        else:
-            chunks = candidates[: self._settings.reranker_top_k]
-        chunks = await self._expand_section_chunks(
-            selected_chunks=chunks, max_chunks=self._settings.reranker_top_k
-        )
+            yield f"data: {json.dumps({'done': True, 'sources': sources})}\n\n"
 
-        prompt = build_prompt(
-            question=question,
-            chunks=chunks,
-            history=history.messages,
-            max_context_chars=self._settings.max_context_chars,
-            max_context_tokens=self._settings.max_context_tokens,
-        )
+        except ValidationError as exc:
+            logger.error("Validation error in chat_stream: %s", exc)
+            yield f"data: {json.dumps({'error': f'Input inválido: {exc}'})}\n\n"
+        except httpx.TimeoutException as exc:
+            logger.error("Timeout in chat_stream: %s", exc)
+            yield f"data: {json.dumps({'error': 'Timeout esperando respuesta del servicio upstream (LLM/Qdrant).'})}\n\n"
+        except httpx.ConnectError as exc:
+            logger.error("Connection error in chat_stream: %s", exc)
+            yield f"data: {json.dumps({'error': 'No se pudo conectar a un servicio upstream (LLM o Qdrant).'})}\n\n"
+        except httpx.HTTPStatusError as exc:
+            logger.error("HTTP status error in chat_stream: %s", exc)
+            yield f"data: {json.dumps({'error': f'Error del servicio upstream: HTTP {exc.response.status_code}.'})}\n\n"
+        except Exception as exc:
+            logger.error("Unexpected error in chat_stream: %s", exc)
+            yield f"data: {json.dumps({'error': f'Error en el pipeline RAG: {exc}'})}\n\n"
 
-        full_answer = ""
-        async for token in self._llm.generate_stream(prompt, log_request=True):
-            full_answer += token
-            yield f"data: {json.dumps({'token': token})}\n\n"
-
-        await self._memory.add_turn(
-            conversation_id=conversation_id,
-            question=question,
-            answer=full_answer,
-            username=username,
-        )
-
-        sources = list(dict.fromkeys(c.source for c in chunks))
-        yield f"data: {json.dumps({'done': True, 'sources': sources})}\n\n"
-
-    def _filter_chunks(
-        self,
-        chunks: list[RetrievedChunk],
-        min_score: float = 0.001,
-    ) -> list[RetrievedChunk]:
-        return [c for c in chunks if c.score >= min_score and c.text.strip()]
+    def _filter_chunks(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+        return [c for c in chunks if c.score >= self._settings.retrieval_min_score and c.text.strip()]
 
     async def _expand_section_chunks(
         self,
