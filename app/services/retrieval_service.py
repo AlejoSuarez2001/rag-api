@@ -200,7 +200,7 @@ class RetrievalService:
     def _to_chunk(result) -> RetrievedChunk:
         payload = result.payload or {}
         return RetrievedChunk(
-            text = payload.get("text", "")
+            text = payload.get("text", ""),
             source=payload.get("source", "unknown"),
             score=result.score,
             chunk_id=payload.get("chunk_id", str(result.id)),
