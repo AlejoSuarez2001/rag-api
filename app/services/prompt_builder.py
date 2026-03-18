@@ -130,10 +130,6 @@ def _sanitize_chunk_text(text: str) -> str:
         if line == "!":
             continue
 
-        # Drop standalone digits that are figure/step references without context
-        if re.fullmatch(r"\d{1,2}", line):
-            continue
-
         match = _IMAGE_FILENAME_PATTERN.match(line)
         if match:
             description = match.group(1)
