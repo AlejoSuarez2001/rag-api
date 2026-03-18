@@ -1,5 +1,6 @@
 import logging
 import re
+from html import unescape
 
 import tiktoken
 
@@ -8,10 +9,8 @@ from app.models.schemas import Message, RetrievedChunk
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Eres un asistente técnico especializado en soporte de sistemas y aplicaciones. \
-Tu objetivo es ayudar al usuario de forma clara, directa y útil.\
+Tu objetivo es ayudar al usuario de forma clara, directa y útil. \
 Dispones de información interna que puede ayudarte a responder, pero NUNCA debes mencionar su existencia ni hacer referencia a "documentación", "fragmentos" o "contexto".
-
-Reglas de comportamiento:
 
 Reglas de comportamiento:
 - Responde siempre en el mismo idioma del usuario.
@@ -23,6 +22,7 @@ Reglas de comportamiento:
 - Sé claro y conciso.
 - Si la respuesta es un procedimiento, utiliza pasos numerados.
 - Evita frases robóticas o poco naturales.
+- Si el contexto indica explícitamente que no hay información disponible, debes informar que no puedes responder la consulta con la información actual.
 """
 
 _ENCODING_NAME = "cl100k_base"
@@ -115,6 +115,7 @@ def _build_history(messages: list[Message]) -> str:
 
 
 def _sanitize_chunk_text(text: str) -> str:
+    text = unescape(text)
     normalized = _LEGACY_IMAGE_MARKER_PATTERN.sub(
         "[Imagen de referencia en esta sección]",
         text,
@@ -124,6 +125,15 @@ def _sanitize_chunk_text(text: str) -> str:
     previous_line = ""
     for raw_line in normalized.splitlines():
         line = raw_line.strip()
+
+        # Drop lone "!" left by broken image references
+        if line == "!":
+            continue
+
+        # Drop standalone digits that are figure/step references without context
+        if re.fullmatch(r"\d{1,2}", line):
+            continue
+
         match = _IMAGE_FILENAME_PATTERN.match(line)
         if match:
             description = match.group(1)

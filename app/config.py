@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     reranker_device: str = "cuda"
     reranker_top_k: int = 5       # final chunks after reranking
     retrieval_candidates: int = 15  # broader initial fetch before reranking
-    retrieval_min_score: float = 0.5  # chunks below this score are discarded
+    retrieval_min_score: float = 0.01  # chunks below this score are discarded (RRF scores max ~0.033)
 
     # App
     app_name: str = "Hybrid RAG Support API"

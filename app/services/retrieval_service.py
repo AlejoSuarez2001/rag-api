@@ -200,7 +200,7 @@ class RetrievalService:
     def _to_chunk(result) -> RetrievedChunk:
         payload = result.payload or {}
         return RetrievedChunk(
-            text=payload.get("text", ""),
+            text=payload.get("content", payload.get("text", "")),
             source=payload.get("source", "unknown"),
             score=result.score,
             chunk_id=payload.get("chunk_id", str(result.id)),
@@ -212,7 +212,7 @@ class RetrievalService:
     def _point_to_chunk(point, score: float) -> RetrievedChunk:
         payload = point.payload or {}
         return RetrievedChunk(
-            text=payload.get("text", ""),
+            text=payload.get("content", payload.get("text", "")),
             source=payload.get("source", "unknown"),
             score=score,
             chunk_id=payload.get("chunk_id", str(point.id)),
