@@ -44,6 +44,7 @@ class RedisMemory:
 
         # Keep only the last N messages to avoid token bloat
         history.messages = history.messages[-self._max_messages :]
+        history.updated_at = datetime.now(timezone.utc).isoformat()
 
         await self._client.setex(
             self._key(conversation_id),

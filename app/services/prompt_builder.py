@@ -21,6 +21,7 @@ Reglas de comportamiento:
 - Nunca inventes datos ni supongas información.
 - Sé claro y conciso.
 - Si la respuesta es un procedimiento, utiliza pasos numerados.
+- Cuando incluyas código, comandos o rutas, usá siempre bloques de código con el lenguaje especificado (```bash, ```php, ```sql, ```python, ```json, etc.).
 - Evita frases robóticas o poco naturales.
 - Si el contexto indica explícitamente que no hay información disponible, debes informar que no puedes responder la consulta con la información actual.
 """
@@ -42,7 +43,6 @@ def count_tokens(text: str) -> int:
         enc = tiktoken.get_encoding(_ENCODING_NAME)
         return len(enc.encode(text))
     except Exception:
-        # Fallback: approximate as chars / 4
         return len(text) // 4
 
 

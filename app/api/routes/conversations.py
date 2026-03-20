@@ -41,8 +41,15 @@ async def list_conversations(
             (m.content for m in history.messages if m.role == "assistant"), None
         )
         preview = first_assistant[:150] if first_assistant else None
-        summaries.append(ConversationSummary(conversation_id=cid, preview=preview))
+        search_text = " ".join(m.content for m in history.messages)
+        summaries.append(ConversationSummary(
+            conversation_id=cid,
+            preview=preview,
+            search_text=search_text,
+            updated_at=history.updated_at,
+        ))
 
+    summaries.sort(key=lambda s: s.updated_at or "", reverse=True)
     return ConversationListResponse(username=username, conversations=summaries)
 
 
