@@ -26,6 +26,7 @@ class LLMService:
         self._embed_model_name = settings.embedding_model
         self._embed_device = settings.embedding_device
         self._timeout = settings.ollama_timeout
+        self._num_ctx = settings.ollama_num_ctx
 
     async def generate(self, prompt: str, *, log_request: bool = False) -> str:
         """Send a prompt to Ollama and return the generated text."""
@@ -33,6 +34,7 @@ class LLMService:
             "model": self._model,
             "prompt": prompt,
             "stream": False,
+            "options": {"num_ctx": self._num_ctx},
         }
         if log_request:
             logger.info(
@@ -50,7 +52,7 @@ class LLMService:
 
     async def generate_stream(self, prompt: str, *, log_request: bool = False) -> AsyncIterator[str]:
         """Stream tokens from Ollama one by one."""
-        payload = {"model": self._model, "prompt": prompt, "stream": True}
+        payload = {"model": self._model, "prompt": prompt, "stream": True, "options": {"num_ctx": self._num_ctx}}
         if log_request:
             logger.info(
                 "Final Ollama generate payload:\n%s",

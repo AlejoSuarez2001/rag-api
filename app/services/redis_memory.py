@@ -1,7 +1,9 @@
 import json
+import uuid
+from datetime import datetime, timezone
 import redis.asyncio as aioredis
 from app.config import Settings
-from app.models.schemas import Message, ConversationHistory
+from app.models.schemas import Message, ConversationHistory, SharedConversation
 
 
 class RedisMemory:
@@ -14,6 +16,7 @@ class RedisMemory:
             decode_responses=True,
         )
         self._ttl = settings.redis_ttl_seconds
+        self._share_ttl = settings.share_ttl_seconds
         self._max_messages = settings.max_history_messages
 
     async def get_history(self, conversation_id: str) -> ConversationHistory:
@@ -53,6 +56,29 @@ class RedisMemory:
             await self._client.sadd(user_key, conversation_id)
             await self._client.expire(user_key, self._ttl)
 
+    async def create_share(self, conversation_id: str) -> SharedConversation | None:
+        history = await self.get_history(conversation_id)
+        if not history.messages:
+            return None
+        token = uuid.uuid4().hex
+        snapshot = SharedConversation(
+            share_token=token,
+            messages=history.messages,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        await self._client.setex(
+            self._share_key(token),
+            self._share_ttl,
+            snapshot.model_dump_json(),
+        )
+        return snapshot
+
+    async def get_share(self, token: str) -> SharedConversation | None:
+        raw = await self._client.get(self._share_key(token))
+        if not raw:
+            return None
+        return SharedConversation(**json.loads(raw))
+
     async def get_user_conversations(self, username: str) -> list[str]:
         members = await self._client.smembers(self._user_key(username))
         return list(members)
@@ -73,3 +99,7 @@ class RedisMemory:
     @staticmethod
     def _user_key(username: str) -> str:
         return f"rag:user:{username}:convs"
+
+    @staticmethod
+    def _share_key(token: str) -> str:
+        return f"rag:share:{token}"

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str | None = None
     redis_ttl_seconds: int = 3600
+    share_ttl_seconds: int = 3600
 
     # Qdrant
     qdrant_host: str = "qdrant-rag"
@@ -23,8 +24,9 @@ class Settings(BaseSettings):
 
     # Ollama (solo para generación de texto)
     ollama_base_url: str = "http://host.docker.internal:11434"
-    ollama_model: str = "llama3"
+    ollama_model: str = "llama3.1"
     ollama_timeout: int = 120
+    ollama_num_ctx: int = 4096
 
     # Embeddings (sentence-transformers — debe coincidir con rag_ingestion_service)
     embedding_model: str = "paraphrase-multilingual-mpnet-base-v2"

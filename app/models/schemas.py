@@ -33,6 +33,12 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationSummary]
 
 
+class SharedConversation(BaseModel):
+    share_token: str
+    messages: list[Message]
+    created_at: str
+
+
 class RetrievedChunk(BaseModel):
     text: str
     source: str

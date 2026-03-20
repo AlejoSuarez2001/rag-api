@@ -17,6 +17,7 @@ from app.services.prompt_builder import build_prompt
 logger = logging.getLogger(__name__)
 
 
+
 class RAGService:
     """Orchestrates the full RAG pipeline for a single chat turn."""
 
@@ -72,24 +73,34 @@ class RAGService:
         # 5. Rerank candidates with cross-encoder
         if self._reranker and candidates:
             chunks = self._reranker.rerank(standalone_query, candidates)
-            logger.info("Reranked to %d chunks", len(chunks))
+            logger.info(
+                "Reranked chunks (%d): %s",
+                len(chunks),
+                [
+                    {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                    for i, c in enumerate(chunks)
+                ],
+            )
         else:
             chunks = candidates[: self._settings.reranker_top_k]
+            logger.info(
+                "Reranker disabled — top chunks by retrieval score (%d): %s",
+                len(chunks),
+                [
+                    {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                    for i, c in enumerate(chunks)
+                ],
+            )
         chunks = await self._expand_section_chunks(
             selected_chunks=chunks,
             max_chunks=self._settings.reranker_top_k,
         )
-
         logger.info(
-            "Selected chunks for final prompt: %s",
+            "Final chunks sent to prompt after section expansion (%d): %s",
+            len(chunks),
             [
-                {
-                    "chunk_id": chunk.chunk_id,
-                    "title": chunk.title,
-                    "source": chunk.source,
-                    "score": chunk.score,
-                }
-                for chunk in chunks
+                {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                for i, c in enumerate(chunks)
             ],
         )
 
@@ -148,10 +159,34 @@ class RAGService:
 
             if self._reranker and candidates:
                 chunks = self._reranker.rerank(standalone_query, candidates)
+                logger.info(
+                    "Reranked chunks (%d): %s",
+                    len(chunks),
+                    [
+                        {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                        for i, c in enumerate(chunks)
+                    ],
+                )
             else:
                 chunks = candidates[: self._settings.reranker_top_k]
+                logger.info(
+                    "Reranker disabled — top chunks by retrieval score (%d): %s",
+                    len(chunks),
+                    [
+                        {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                        for i, c in enumerate(chunks)
+                    ],
+                )
             chunks = await self._expand_section_chunks(
                 selected_chunks=chunks, max_chunks=self._settings.reranker_top_k
+            )
+            logger.info(
+                "Final chunks sent to prompt after section expansion (%d): %s",
+                len(chunks),
+                [
+                    {"rank": i + 1, "chunk_id": c.chunk_id, "title": c.title, "source": c.source, "score": round(c.score, 4)}
+                    for i, c in enumerate(chunks)
+                ],
             )
 
             prompt = build_prompt(

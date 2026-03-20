@@ -7,7 +7,7 @@ from app.services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 _STANDALONE_PROMPT = """Tu única tarea es resolver referencias implícitas al historial de conversación \
-(pronombres como "eso", "lo mismo", "el anterior", "esa opción", etc.) en la pregunta del usuario.
+(pronombres como "eso", "lo mismo", "el anterior", "esa opción", "su", "sus", etc.) en la pregunta del usuario.
 
 REGLAS ESTRICTAS:
 - Si la pregunta NO tiene referencias implícitas al historial, devuélvela EXACTAMENTE igual, sin cambiar ninguna palabra.
@@ -15,6 +15,15 @@ REGLAS ESTRICTAS:
 - NO agregues palabras, contexto, institución, ni información que no esté en la pregunta original.
 - NO mejores, reformules ni expandas la pregunta.
 - NO cambies el verbo ni la intención de la pregunta.
+- NO hagas preguntas de vuelta al usuario.
+- La respuesta debe ser siempre una afirmación o pregunta directa sobre el tema, nunca una solicitud de aclaración.
+
+EJEMPLO:
+Historial:
+Usuario: Como funcionan los archivos DKI
+Asistente: Los archivos DKI son...
+Pregunta original: En general, como es su estructura y como tratarlos
+Respuesta correcta: En general, como es la estructura de los archivos DKI y como tratarlos
 
 Historial:
 {history}
