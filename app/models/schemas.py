@@ -10,12 +10,14 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str] = Field(default_factory=list)
+    no_info: bool = False
 
 
 class Message(BaseModel):
     role: str  # "user" | "assistant"
     content: str
     sources: list[str] = Field(default_factory=list)
+    no_info: bool = False
 
 
 class ConversationHistory(BaseModel):

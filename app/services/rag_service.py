@@ -16,6 +16,31 @@ from app.services.prompt_builder import build_prompt
 
 logger = logging.getLogger(__name__)
 
+_NO_INFO_MARKER = "[SIN_INFO]"
+
+_NO_INFO_PHRASES = (
+    "no tengo información",
+    "no cuento con información",
+    "no cuento con esa información",
+    "no dispongo de información",
+    "no encuentro información",
+    "no tengo datos",
+    "no tengo suficiente información",
+    "información suficiente para responder",
+    "no puedo responder",
+    "no está en mi información",
+    "no tengo info",
+)
+
+
+def _strip_no_info_marker(text: str) -> tuple[str, bool]:
+    """Returns (clean_text, no_info). Marker takes priority; keywords as fallback."""
+    stripped = text.lstrip()
+    if stripped.startswith(_NO_INFO_MARKER):
+        return stripped[len(_NO_INFO_MARKER):].lstrip(), True
+    lower = text.lower()
+    no_info = any(phrase in lower for phrase in _NO_INFO_PHRASES)
+    return text, no_info
 
 
 class RAGService:
@@ -115,7 +140,8 @@ class RAGService:
         logger.info("Final answer prompt built (%d chars)", len(prompt))
 
         # 7. Call LLM
-        answer = await self._llm.generate(prompt, log_request=True)
+        raw_answer = await self._llm.generate(prompt, log_request=True)
+        answer, no_info = _strip_no_info_marker(raw_answer)
 
         # 8. Collect unique sources
         sources = list(dict.fromkeys(c.source for c in chunks))
@@ -127,9 +153,10 @@ class RAGService:
             answer=answer,
             username=username,
             sources=sources,
+            no_info=no_info,
         )
 
-        return ChatResponse(answer=answer, sources=sources)
+        return ChatResponse(answer=answer, sources=sources, no_info=no_info)
 
     async def chat_stream(
         self, conversation_id: str, question: str, username: str | None = None
@@ -198,20 +225,39 @@ class RAGService:
             )
 
             full_answer = ""
+            buffer = ""
+            marker_checked = False
+
             async for token in self._llm.generate_stream(prompt, log_request=True):
                 full_answer += token
-                yield f"data: {json.dumps({'token': token})}\n\n"
+                if not marker_checked:
+                    buffer += token
+                    if len(buffer) >= len(_NO_INFO_MARKER):
+                        marker_checked = True
+                        buffer, _ = _strip_no_info_marker(buffer)
+                        if buffer:
+                            yield f"data: {json.dumps({'token': buffer})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
 
+            # Flush buffer if stream ended before we had enough chars to check
+            if not marker_checked and buffer:
+                buffer, _ = _strip_no_info_marker(buffer)
+                if buffer:
+                    yield f"data: {json.dumps({'token': buffer})}\n\n"
+
+            clean_answer, no_info = _strip_no_info_marker(full_answer)
             sources = list(dict.fromkeys(c.source for c in chunks))
             await self._memory.add_turn(
                 conversation_id=conversation_id,
                 question=question,
-                answer=full_answer,
+                answer=clean_answer,
                 username=username,
                 sources=sources,
+                no_info=no_info,
             )
 
-            yield f"data: {json.dumps({'done': True, 'sources': sources})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'sources': sources, 'no_info': no_info})}\n\n"
 
         except ValidationError as exc:
             logger.error("Validation error in chat_stream: %s", exc)
