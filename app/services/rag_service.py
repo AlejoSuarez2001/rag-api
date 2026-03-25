@@ -275,6 +275,37 @@ class RAGService:
             logger.error("Unexpected error in chat_stream: %s", exc)
             yield f"data: {json.dumps({'error': f'Error en el pipeline RAG: {exc}'})}\n\n"
 
+    async def generate_ticket_description(self, conversation_id: str) -> str:
+        history = await self._memory.get_history(conversation_id)
+        messages = history.messages[-20:]
+
+        conversation_text = "\n".join(
+            f"{'Usuario' if m.role == 'user' else 'Asistente'}: {m.content}"
+            for m in messages
+        )
+
+        prompt = (
+            "Eres un asistente de soporte técnico.\n\n"
+            "Analiza la conversación y genera un ticket.\n\n"
+            "Reglas:\n"
+            "- No inventes información.\n"
+            "- Sé claro y conciso.\n"
+            "- Usa solo la información disponible.\n"
+            "- Escribe en español.\n"
+            "- No uses markdown, asteriscos, negritas ni ningún tipo de formato especial. Solo texto plano.\n\n"
+            "Formato obligatorio:\n\n"
+            "Problema del usuario:\n"
+            "- Qué quiere hacer y qué falla.\n\n"
+            "Intento de resolución:\n"
+            "- Qué se probó (si no hay, escribir \"No se especifica\").\n\n"
+            "Tipo de problema:\n"
+            "- Bug | Configuración | Acceso | VPN | Otro\n\n"
+            "---\n\n"
+            f"Conversación:\n{conversation_text}"
+        )
+
+        return await self._llm.generate(prompt)
+
     def _filter_chunks(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         return [c for c in chunks if c.score >= self._settings.retrieval_min_score and c.text.strip()]
 
