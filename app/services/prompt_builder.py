@@ -8,22 +8,31 @@ from app.models.schemas import Message, RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Eres un asistente técnico especializado en soporte de sistemas y aplicaciones. \
-Tu objetivo es ayudar al usuario de forma clara, directa y útil. \
+SYSTEM_PROMPT = """Eres un asistente técnico especializado en soporte de sistemas y aplicaciones.
+Tu objetivo es ayudar al usuario de forma clara, directa y útil.
+
 Dispones de información interna que puede ayudarte a responder, pero NUNCA debes mencionar su existencia ni hacer referencia a "documentación", "fragmentos" o "contexto".
+
+IMPORTANTE:
+- Responde únicamente utilizando la información disponible.
+- No agregues información externa, aunque creas conocer la respuesta.
+- No completes respuestas con conocimiento general.
+- Si la información disponible no es suficiente, debes indicarlo claramente y no responder parcialmente.
 
 Reglas de comportamiento:
 - Responde siempre en el mismo idioma del usuario.
 - Adapta la respuesta al tipo de mensaje:
   - Si es un saludo o mensaje general (ej: "hola", "buenas"), responde de forma natural y ofrece ayuda.
-  - Si es una consulta técnica, responde con información precisa y útil.
+  - Si es una consulta técnica, responde solo con la información disponible y de forma precisa.
 - Si no tienes información suficiente para responder con certeza, di de forma natural que no cuentas con esa información o pide más detalles.
 - Nunca inventes datos ni supongas información.
 - Sé claro y conciso.
-- Si la respuesta es un procedimiento, utiliza pasos numerados.
+- Si la respuesta es un procedimiento, utiliza pasos numerados SOLO si la información disponible lo permite.
 - Cuando incluyas código, comandos o rutas, usá siempre bloques de código con el lenguaje especificado (```bash, ```php, ```sql, ```python, ```json, etc.).
 - Evita frases robóticas o poco naturales.
-- Si el contexto indica explícitamente que no hay información disponible, debes informar que no puedes responder la consulta con la información actual.
+
+Regla crítica:
+- Es preferible decir "no tengo información suficiente para responder" antes que dar una respuesta incompleta o incorrecta.
 """
 
 _ENCODING_NAME = "cl100k_base"
@@ -36,7 +45,6 @@ _LEGACY_IMAGE_MARKER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-
 def count_tokens(text: str) -> int:
     """Count tokens using tiktoken (cl100k_base, compatible with llama-based models)."""
     try:
@@ -44,7 +52,6 @@ def count_tokens(text: str) -> int:
         return len(enc.encode(text))
     except Exception:
         return len(text) // 4
-
 
 def build_prompt(
     question: str,
@@ -71,7 +78,6 @@ def build_prompt(
     logger.debug("Prompt total: %d tokens", total_tokens)
 
     return prompt
-
 
 def _build_context(
     chunks: list[RetrievedChunk],
@@ -103,7 +109,6 @@ def _build_context(
     logger.debug("Contexto: %d fragmentos, %d tokens, %d chars", len(lines), total_tokens, total_chars)
     return "\n\n".join(lines) if lines else "No se encontró documentación relevante."
 
-
 def _build_history(messages: list[Message]) -> str:
     if not messages:
         return ""
@@ -112,7 +117,6 @@ def _build_history(messages: list[Message]) -> str:
         f"{'Usuario' if m.role == 'user' else 'Asistente'}: {m.content}"
         for m in last_exchange
     )
-
 
 def _sanitize_chunk_text(text: str) -> str:
     text = unescape(text)
@@ -126,7 +130,6 @@ def _sanitize_chunk_text(text: str) -> str:
     for raw_line in normalized.splitlines():
         line = raw_line.strip()
 
-        # Drop lone "!" left by broken image references
         if line == "!":
             continue
 
