@@ -12,7 +12,7 @@ from app.services.query_rewriter import QueryRewriter
 from app.services.reranker import Reranker
 from app.services.redis_memory import RedisMemory
 from app.services.retrieval_service import RetrievalService
-from app.services.prompt_builder import build_prompt
+from app.services.prompt_builder import build_messages
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class RAGService:
         if self._settings.query_rewrite_enabled:
             standalone_query = await self._rewriter.rewrite_standalone(
                 question=question,
-                history=history.messages,
+                history=history.messages[-10:],
             )
             logger.info("Standalone query: %r", standalone_query)
 
@@ -129,18 +129,18 @@ class RAGService:
             ],
         )
 
-        # 6. Build prompt
-        prompt = build_prompt(
+        # 6. Build messages
+        messages = build_messages(
             question=question,
             chunks=chunks,
-            history=history.messages,
+            history=history.messages[-10:],
             max_context_chars=self._settings.max_context_chars,
             max_context_tokens=self._settings.max_context_tokens,
         )
-        logger.info("Final answer prompt built (%d chars)", len(prompt))
+        logger.info("Final answer messages built (%d turns)", len(messages))
 
         # 7. Call LLM
-        raw_answer = await self._llm.generate(prompt, log_request=True)
+        raw_answer = await self._llm.generate(messages, log_request=True)
         answer, no_info = _strip_no_info_marker(raw_answer)
 
         # 8. Collect unique sources
@@ -216,10 +216,10 @@ class RAGService:
                 ],
             )
 
-            prompt = build_prompt(
+            messages = build_messages(
                 question=question,
                 chunks=chunks,
-                history=history.messages,
+                history=history.messages[-10:],
                 max_context_chars=self._settings.max_context_chars,
                 max_context_tokens=self._settings.max_context_tokens,
             )
@@ -228,7 +228,7 @@ class RAGService:
             buffer = ""
             marker_checked = False
 
-            async for token in self._llm.generate_stream(prompt, log_request=True):
+            async for token in self._llm.generate_stream(messages, log_request=True):
                 full_answer += token
                 if not marker_checked:
                     buffer += token
@@ -304,7 +304,7 @@ class RAGService:
             f"Conversación:\n{conversation_text}"
         )
 
-        return await self._llm.generate(prompt)
+        return await self._llm.generate([{"role": "user", "content": prompt}])
 
     def _filter_chunks(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         return [c for c in chunks if c.score >= self._settings.retrieval_min_score and c.text.strip()]

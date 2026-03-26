@@ -55,31 +55,27 @@ def count_tokens(text: str) -> int:
     except Exception:
         return len(text) // 4
 
-def build_prompt(
+def build_messages(
     question: str,
     chunks: list[RetrievedChunk],
     history: list[Message],
     max_context_chars: int = 12000,
     max_context_tokens: int = 3000,
-) -> str:
+) -> list[dict]:
     context = _build_context(chunks, max_context_chars, max_context_tokens)
-    history_text = _build_history(history)
 
-    parts = [SYSTEM_PROMPT]
+    system_content = f"{SYSTEM_PROMPT}\n### Contexto de documentación técnica:\n{context}"
+    messages: list[dict] = [{"role": "system", "content": system_content}]
 
-    if history_text:
-        parts.append(f"\n### Historial de conversación:\n{history_text}")
+    for m in history:
+        messages.append({"role": m.role, "content": m.content})
 
-    parts.append(f"\n### Contexto de documentación técnica:\n{context}")
-    parts.append(f"\n### Pregunta del usuario:\n{question}")
-    parts.append("\n### Respuesta:")
+    messages.append({"role": "user", "content": question})
 
-    prompt = "\n".join(parts)
+    total_tokens = count_tokens(system_content + question)
+    logger.debug("Prompt total (aprox): %d tokens", total_tokens)
 
-    total_tokens = count_tokens(prompt)
-    logger.debug("Prompt total: %d tokens", total_tokens)
-
-    return prompt
+    return messages
 
 def _build_context(
     chunks: list[RetrievedChunk],
@@ -111,14 +107,6 @@ def _build_context(
     logger.debug("Contexto: %d fragmentos, %d tokens, %d chars", len(lines), total_tokens, total_chars)
     return "\n\n".join(lines) if lines else "No se encontró documentación relevante."
 
-def _build_history(messages: list[Message]) -> str:
-    if not messages:
-        return ""
-    last_exchange = messages[-2:]
-    return "\n".join(
-        f"{'Usuario' if m.role == 'user' else 'Asistente'}: {m.content}"
-        for m in last_exchange
-    )
 
 def _sanitize_chunk_text(text: str) -> str:
     text = unescape(text)

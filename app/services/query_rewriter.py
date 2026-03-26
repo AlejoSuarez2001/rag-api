@@ -62,7 +62,7 @@ class QueryRewriter:
         prompt = _STANDALONE_PROMPT.format(history=history_text, question=question)
 
         try:
-            rewritten = await self._llm.generate(prompt)
+            rewritten = await self._llm.generate([{"role": "user", "content": prompt}])
             rewritten = rewritten.strip().strip('"').strip("'")
             logger.info(
                 "Ollama rewrote user query before embedding: original=%r rewritten=%r",
@@ -79,7 +79,7 @@ class QueryRewriter:
         prompt = _EXPANSION_PROMPT.format(n=self._expansion_count, query=query)
 
         try:
-            raw = await self._llm.generate(prompt)
+            raw = await self._llm.generate([{"role": "user", "content": prompt}])
             # Extract the JSON array from the response (LLMs sometimes add extra text)
             start = raw.find("[")
             end = raw.rfind("]") + 1
