@@ -66,7 +66,7 @@ class RAGService:
         # 1. Retrieve conversation history
         history = await self._memory.get_history(conversation_id)
 
-        # 2. Query rewriting — remove implicit references to conversation history
+        # 2. Query rewriting: remove implicit references to conversation history
         standalone_query = question
         if self._settings.query_rewrite_enabled:
             standalone_query = await self._rewriter.rewrite_standalone(

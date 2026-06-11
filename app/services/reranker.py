@@ -22,9 +22,9 @@ class Reranker:
         self._device = device
         self._top_k = top_k
 
-    # ------------------------------------------------------------------
+
     # Public API
-    # ------------------------------------------------------------------
+
 
     def rerank(self, query: str, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         """Return chunks sorted by cross-encoder relevance score, limited to top_k."""
@@ -59,9 +59,9 @@ class Reranker:
         )
         return reranked
 
-    # ------------------------------------------------------------------
+
     # Lazy singleton model loader
-    # ------------------------------------------------------------------
+
 
     def _get_model(self):
         if Reranker._model is None:

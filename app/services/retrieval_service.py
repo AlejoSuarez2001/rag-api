@@ -125,9 +125,8 @@ class RetrievalService:
         chunks.sort(key=lambda chunk: (chunk.position is None, chunk.position or 0))
         return chunks
 
-    # ------------------------------------------------------------------
     # Private helpers
-    # ------------------------------------------------------------------
+
 
     async def _vector_search(
         self, embedding: list[float], limit: int
