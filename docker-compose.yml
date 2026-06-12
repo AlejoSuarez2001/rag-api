@@ -6,5 +6,7 @@ networks:
 services:
   api:
     build: .
+    volumes:
+      - .:/app
     networks:
       - traefik

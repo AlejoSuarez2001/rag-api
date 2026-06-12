@@ -80,3 +80,35 @@ async def get_current_token_payload(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno al validar token JWT: {exc}",
         ) from exc
+
+
+def require_ingestion_role(*allowed_roles: str):
+    """Valida que el usuario tenga al menos uno de los roles especificados en el client del frontend."""
+    async def dependency(
+        payload: dict[str, Any] = Depends(get_current_token_payload),
+        settings: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        client_roles = (
+            payload.get("resource_access", {})
+            .get(settings.keycloak_client_id, {})
+            .get("roles", [])
+        )
+
+        if not any(role in client_roles for role in allowed_roles):
+            logger.warning(
+                "Usuario sin permisos. Client: %s, roles requeridos: %s, roles actuales: %s",
+                settings.keycloak_client_id,
+                allowed_roles,
+                client_roles,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permisos para acceder a este recurso.",
+            )
+
+        return payload
+
+    return dependency
+
+
+require_ingestion_admin = require_ingestion_role("ROLE_INGESTION_ADMIN")

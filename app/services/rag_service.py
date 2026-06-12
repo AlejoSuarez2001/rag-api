@@ -54,9 +54,9 @@ class RAGService:
         self._rewriter = QueryRewriter(self._llm, settings.query_expansion_count)
         self._reranker = (
             Reranker(
-                settings.reranker_model,
-                settings.reranker_device,
-                settings.reranker_top_k,
+                reranker_url=settings.reranker_url,
+                top_k=settings.reranker_top_k,
+                timeout=settings.reranker_timeout,
             )
             if settings.reranker_enabled
             else None
