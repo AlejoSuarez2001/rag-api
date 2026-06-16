@@ -44,6 +44,7 @@ async def list_conversations(
         search_text = " ".join(m.content for m in history.messages)
         summaries.append(ConversationSummary(
             conversation_id=cid,
+            title=history.title,
             preview=preview,
             search_text=search_text,
             updated_at=history.updated_at,

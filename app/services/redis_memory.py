@@ -55,6 +55,17 @@ class RedisMemory:
             await self._client.sadd(user_key, conversation_id)
             await self._client.expire(user_key, self._ttl)
 
+    async def set_title(self, conversation_id: str, title: str) -> None:
+        history = await self.get_history(conversation_id)
+        if not history.messages:
+            return
+        history.title = title
+        await self._client.setex(
+            self._key(conversation_id),
+            self._ttl,
+            history.model_dump_json(),
+        )
+
     async def create_share(self, conversation_id: str) -> SharedConversation | None:
         history = await self.get_history(conversation_id)
         if not history.messages:

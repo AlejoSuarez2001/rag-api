@@ -23,12 +23,14 @@ class Message(BaseModel):
 class ConversationHistory(BaseModel):
     conversation_id: str
     username: Optional[str] = None
+    title: Optional[str] = None
     messages: list[Message] = Field(default_factory=list)
     updated_at: Optional[str] = None
 
 
 class ConversationSummary(BaseModel):
     conversation_id: str
+    title: str | None = None
     preview: str | None = None
     search_text: str | None = None
     updated_at: str | None = None

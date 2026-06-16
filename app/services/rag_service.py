@@ -36,6 +36,32 @@ _NO_INFO_PHRASES = (
 )
 
 
+_FOLLOWUP_PROMPT = """Basándote en la conversación y en los temas disponibles en la documentación, \
+generá 1 pregunta de seguimiento que el usuario probablemente quiera hacer a continuación.
+
+REGLAS:
+- Corta y en primera persona (como la escribiría el usuario).
+- Que se pueda responder con los temas documentados listados abajo.
+- No repitas la pregunta original ni inventes temas fuera de los listados.
+
+Pregunta del usuario: {question}
+Respuesta dada: {answer}
+
+Temas documentados disponibles:
+{topics}
+
+Respondé ÚNICAMENTE con un JSON array de un solo string. Ejemplo: ["¿Cómo configuro X?"]"""
+
+
+_TITLE_PROMPT = """Generá un título corto (máximo 5 palabras) que resuma el tema de esta \
+conversación de soporte técnico. Sin comillas, sin punto final, en el idioma del usuario.
+
+Usuario: {question}
+Asistente: {answer}
+
+Respondé ÚNICAMENTE con el título."""
+
+
 def _parse_markers(text: str) -> tuple[str, bool, bool]:
     """Returns (clean_text, no_info, chitchat). El marcador inicial tiene prioridad;
     las frases keyword son fallback para no_info."""
@@ -71,6 +97,7 @@ class RAGService:
     async def chat(self, conversation_id: str, question: str, username: str | None = None) -> ChatResponse:
         # 1. Retrieve conversation history
         history = await self._memory.get_history(conversation_id)
+        is_first_turn = len(history.messages) == 0
 
         # 2. Query rewriting: remove implicit references to conversation history
         standalone_query = question
@@ -164,6 +191,11 @@ class RAGService:
             no_info=no_info,
         )
 
+        if is_first_turn:
+            title = await self.generate_title(question, answer)
+            if title:
+                await self._memory.set_title(conversation_id, title)
+
         return ChatResponse(answer=answer, sources=sources, no_info=no_info)
 
     async def chat_stream(
@@ -172,6 +204,7 @@ class RAGService:
         """Same pipeline as chat() but streams the LLM response token by token via SSE."""
         try:
             history = await self._memory.get_history(conversation_id)
+            is_first_turn = len(history.messages) == 0
 
             standalone_query = question
             if self._settings.query_rewrite_enabled:
@@ -268,6 +301,20 @@ class RAGService:
 
             yield f"data: {json.dumps({'done': True, 'sources': sources, 'no_info': no_info})}\n\n"
 
+            # Sugerencias de seguimiento: llamado extra y barato DESPUÉS de mostrar la
+            # respuesta. Solo si la respuesta se apoyó en documentación. Fallback a [].
+            if grounded:
+                suggestions = await self.generate_followups(question, clean_answer, chunks)
+                if suggestions:
+                    yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
+
+            # Título automático: solo en el primer turno de la conversación.
+            if is_first_turn:
+                title = await self.generate_title(question, clean_answer)
+                if title:
+                    await self._memory.set_title(conversation_id, title)
+                    yield f"data: {json.dumps({'title': title})}\n\n"
+
         except ValidationError as exc:
             logger.error("Validation error in chat_stream: %s", exc)
             yield f"data: {json.dumps({'error': f'Input inválido: {exc}'})}\n\n"
@@ -283,6 +330,57 @@ class RAGService:
         except Exception as exc:
             logger.error("Unexpected error in chat_stream: %s", exc)
             yield f"data: {json.dumps({'error': f'Error en el pipeline RAG: {exc}'})}\n\n"
+
+    async def generate_title(self, question: str, answer: str) -> str:
+        """Genera un título corto y limpio para la conversación. '' ante cualquier problema."""
+        prompt = _TITLE_PROMPT.format(question=question[:500], answer=answer[:500])
+        try:
+            raw = await self._llm.generate(
+                [{"role": "user", "content": prompt}],
+                options=self._llm.internal_options,
+            )
+            title = raw.strip().strip('"').strip("'").splitlines()[0].strip()
+            return title[:80]
+        except Exception:
+            logger.warning("Title generation failed", exc_info=True)
+            return ""
+
+    async def generate_followups(
+        self,
+        question: str,
+        answer: str,
+        chunks: list[RetrievedChunk],
+    ) -> list[str]:
+        """Genera 2-3 preguntas de seguimiento basadas en la respuesta y los temas documentados.
+        Devuelve [] ante cualquier problema (fallback silencioso)."""
+        titles = list(dict.fromkeys(c.title for c in chunks if c.title))[:5]
+        if not titles:
+            return []
+
+        prompt = _FOLLOWUP_PROMPT.format(
+            question=question,
+            answer=answer[:1500],
+            topics="\n".join(f"- {t}" for t in titles),
+        )
+        try:
+            raw = await self._llm.generate(
+                [{"role": "user", "content": prompt}],
+                options=self._llm.internal_options,
+            )
+            start = raw.find("[")
+            end = raw.rfind("]") + 1
+            if start == -1 or end == 0:
+                return []
+            suggestions = json.loads(raw[start:end])
+            cleaned = [
+                s.strip()
+                for s in suggestions
+                if isinstance(s, str) and s.strip() and s.strip() != question
+            ]
+            return cleaned[:1]
+        except Exception:
+            logger.warning("Follow-up generation failed", exc_info=True)
+            return []
 
     async def generate_ticket_description(self, conversation_id: str) -> str:
         history = await self._memory.get_history(conversation_id)
