@@ -144,6 +144,9 @@ class RetrievalService:
         Keyword search using Qdrant's full-text filter on the 'text' payload field.
         Requires a text index on the collection (created during ingestion).
         """
+        # Defensa: MatchText exige str. Si llega lista/otro tipo, lo aplanamos a texto.
+        if not isinstance(query, str):
+            query = " ".join(map(str, query)) if isinstance(query, (list, tuple)) else str(query)
         keyword_filter = Filter(
             must=[
                 FieldCondition(

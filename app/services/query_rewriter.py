@@ -91,9 +91,18 @@ class QueryRewriter:
             end = raw.rfind("]") + 1
             if start == -1 or end == 0:
                 return [query]
-            variants: list[str] = json.loads(raw[start:end])
+            parsed = json.loads(raw[start:end])
+            # El modelo a veces devuelve un array anidado ([["q1","q2"]]) o elementos
+            # no-string. Normalizamos a una lista plana de strings: si no, un elemento
+            # tipo lista termina pasándose a MatchText y rompe la búsqueda keyword.
+            variants: list[str] = []
+            for v in parsed if isinstance(parsed, list) else []:
+                if isinstance(v, str):
+                    variants.append(v)
+                elif isinstance(v, list):
+                    variants.extend(x for x in v if isinstance(x, str))
             # Always include the original as first candidate
-            all_queries = [query] + [v for v in variants if v and v != query]
+            all_queries = [query] + [v for v in variants if v.strip() and v != query]
             logger.debug("Expanded to %d queries", len(all_queries))
             return all_queries[: self._expansion_count + 1]
         except Exception:
