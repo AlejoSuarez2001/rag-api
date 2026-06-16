@@ -18,15 +18,45 @@ class LLMService:
         self._model = settings.ollama_model
         self._embedding_model = settings.embedding_model
         self._timeout = settings.ollama_timeout
-        self._num_ctx = settings.ollama_num_ctx
+        self._think = settings.llm_think
 
-    async def generate(self, messages: list[dict], *, log_request: bool = False) -> str:
+        # Perfil generación: respuesta al usuario + ticket
+        self._gen_options = {
+            "num_ctx": settings.ollama_num_ctx,
+            "temperature": settings.llm_temperature,
+            "top_p": settings.llm_top_p,
+            "top_k": settings.llm_top_k,
+            "repeat_penalty": settings.llm_repeat_penalty,
+            "presence_penalty": settings.llm_presence_penalty,
+            "num_predict": settings.llm_num_predict,
+        }
+        # Perfil interno: query rewrite/expansion (más frío, salida corta)
+        self._internal_options = {
+            **self._gen_options,
+            "temperature": settings.llm_internal_temperature,
+            "num_predict": settings.llm_internal_num_predict,
+        }
+
+    @property
+    def internal_options(self) -> dict:
+        """Options para llamadas internas (rewrite/expansion)."""
+        return self._internal_options
+
+    async def generate(
+        self,
+        messages: list[dict],
+        *,
+        options: dict | None = None,
+        think: bool | None = None,
+        log_request: bool = False,
+    ) -> str:
         """Send messages to Ollama /api/chat and return the generated text."""
         payload = {
             "model": self._model,
             "messages": messages,
             "stream": False,
-            "options": {"num_ctx": self._num_ctx},
+            "think": self._think if think is None else think,
+            "options": options or self._gen_options,
         }
         if log_request:
             logger.info(
@@ -42,9 +72,22 @@ class LLMService:
             response.raise_for_status()
             return response.json()["message"]["content"]
 
-    async def generate_stream(self, messages: list[dict], *, log_request: bool = False) -> AsyncIterator[str]:
+    async def generate_stream(
+        self,
+        messages: list[dict],
+        *,
+        options: dict | None = None,
+        think: bool | None = None,
+        log_request: bool = False,
+    ) -> AsyncIterator[str]:
         """Stream tokens from Ollama /api/chat one by one."""
-        payload = {"model": self._model, "messages": messages, "stream": True, "options": {"num_ctx": self._num_ctx}}
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "stream": True,
+            "think": self._think if think is None else think,
+            "options": options or self._gen_options,
+        }
         if log_request:
             logger.info(
                 "Final Ollama chat payload:\n%s",

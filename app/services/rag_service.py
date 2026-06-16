@@ -17,6 +17,9 @@ from app.services.prompt_builder import build_messages
 logger = logging.getLogger(__name__)
 
 _NO_INFO_MARKER = "[SIN_INFO]"
+_CHITCHAT_MARKER = "[CHARLA]"
+# Cuántos chars hay que bufferear en streaming antes de poder decidir el marcador.
+_MAX_MARKER_LEN = max(len(_NO_INFO_MARKER), len(_CHITCHAT_MARKER))
 
 _NO_INFO_PHRASES = (
     "no tengo información",
@@ -33,14 +36,17 @@ _NO_INFO_PHRASES = (
 )
 
 
-def _strip_no_info_marker(text: str) -> tuple[str, bool]:
-    """Returns (clean_text, no_info). Marker takes priority; keywords as fallback."""
+def _parse_markers(text: str) -> tuple[str, bool, bool]:
+    """Returns (clean_text, no_info, chitchat). El marcador inicial tiene prioridad;
+    las frases keyword son fallback para no_info."""
     stripped = text.lstrip()
     if stripped.startswith(_NO_INFO_MARKER):
-        return stripped[len(_NO_INFO_MARKER):].lstrip(), True
+        return stripped[len(_NO_INFO_MARKER):].lstrip(), True, False
+    if stripped.startswith(_CHITCHAT_MARKER):
+        return stripped[len(_CHITCHAT_MARKER):].lstrip(), False, True
     lower = text.lower()
     no_info = any(phrase in lower for phrase in _NO_INFO_PHRASES)
-    return text, no_info
+    return text, no_info, False
 
 
 class RAGService:
@@ -141,10 +147,12 @@ class RAGService:
 
         # 7. Call LLM
         raw_answer = await self._llm.generate(messages, log_request=True)
-        answer, no_info = _strip_no_info_marker(raw_answer)
+        answer, no_info, chitchat = _parse_markers(raw_answer)
 
-        # 8. Collect unique sources
-        sources = list(dict.fromkeys(c.source for c in chunks))
+        # 8. Collect unique sources — solo si la respuesta se apoya en la documentación
+        #    (un saludo/charla o un "sin info" no debe mostrar fuentes)
+        grounded = not no_info and not chitchat
+        sources = list(dict.fromkeys(c.source for c in chunks)) if grounded else []
 
         # 9. Persist turn to Redis
         await self._memory.add_turn(
@@ -232,9 +240,9 @@ class RAGService:
                 full_answer += token
                 if not marker_checked:
                     buffer += token
-                    if len(buffer) >= len(_NO_INFO_MARKER):
+                    if len(buffer) >= _MAX_MARKER_LEN:
                         marker_checked = True
-                        buffer, _ = _strip_no_info_marker(buffer)
+                        buffer, _, _ = _parse_markers(buffer)
                         if buffer:
                             yield f"data: {json.dumps({'token': buffer})}\n\n"
                 else:
@@ -242,12 +250,13 @@ class RAGService:
 
             # Flush buffer if stream ended before we had enough chars to check
             if not marker_checked and buffer:
-                buffer, _ = _strip_no_info_marker(buffer)
+                buffer, _, _ = _parse_markers(buffer)
                 if buffer:
                     yield f"data: {json.dumps({'token': buffer})}\n\n"
 
-            clean_answer, no_info = _strip_no_info_marker(full_answer)
-            sources = list(dict.fromkeys(c.source for c in chunks))
+            clean_answer, no_info, chitchat = _parse_markers(full_answer)
+            grounded = not no_info and not chitchat
+            sources = list(dict.fromkeys(c.source for c in chunks)) if grounded else []
             await self._memory.add_turn(
                 conversation_id=conversation_id,
                 question=question,
@@ -285,26 +294,54 @@ class RAGService:
         )
 
         prompt = (
-            "Eres un asistente de soporte técnico.\n\n"
-            "Analiza la conversación y genera un ticket.\n\n"
-            "Reglas:\n"
-            "- No inventes información.\n"
-            "- Sé claro y conciso.\n"
-            "- Usa solo la información disponible.\n"
-            "- Escribe en español.\n"
-            "- No uses markdown, asteriscos, negritas ni ningún tipo de formato especial. Solo texto plano.\n\n"
-            "Formato obligatorio:\n\n"
-            "Problema del usuario:\n"
-            "- Qué quiere hacer y qué falla.\n\n"
-            "Intento de resolución:\n"
-            "- Qué se probó (si no hay, escribir \"No se especifica\").\n\n"
-            "Tipo de problema:\n"
-            "- Bug | Configuración | Acceso | VPN | Otro\n\n"
+            "Eres un asistente experto en creación de tickets de soporte.\n\n"
+            "TAREA: Analiza la conversación y genera un ticket estructurado.\n\n"
+
+            "REGLAS ESTRICTAS:\n"
+            "1. NO inventes información. Solo usa lo explícitamente mencionado.\n"
+            "2. Identifica el PROBLEMA PRINCIPAL (descarta troubleshooting tangencial).\n"
+            "3. Si el usuario no probó soluciones, escribe \"No documentado\".\n"
+            "4. Categoría: Elige UNA sola de [Bug, Configuración, Acceso, VPN, Rendimiento, Otro].\n"
+            "5. SOLO TEXTO PLANO. Sin markdown, asteriscos, negritas.\n\n"
+
+            "FORMATO (línea vacía entre secciones):\n"
+            "Problema Principal:\n"
+            "[Resumen de 2-3 líneas: qué intenta el usuario, qué falla]\n\n"
+
+            "Pasos Reproducidos:\n"
+            "[Si los hay, lista clara. Si no, escribe \"No documentado\"]\n\n"
+
+            "Intentos de Resolución:\n"
+            "[Qué probó. Si nada, escribe \"No documentado\"]\n\n"
+
+            "Comportamiento Esperado vs Real:\n"
+            "[Qué debería pasar vs qué pasó]\n\n"
+
+            "Categoría:\n"
+            "[Una sola: Bug | Configuración | Acceso | VPN | Rendimiento | Otro]\n\n"
+
+            "EJEMPLO:\n"
+            "---\n"
+            "Problema Principal:\n"
+            "Usuario no puede acceder a VPN desde casa. Error \"Connection refused\".\n\n"
+            "Pasos Reproducidos:\n"
+            "1. Abre Cisco AnyConnect\n"
+            "2. Ingresa credenciales\n"
+            "3. Error al conectar\n\n"
+            "Intentos de Resolución:\n"
+            "Reinició la computadora. No probó desinstalar/reinstalar VPN.\n\n"
+            "Comportamiento Esperado vs Real:\n"
+            "Esperado: Conectarse y acceder a recursos internos.\n"
+            "Real: Error de conexión inmediato.\n\n"
+            "Categoría:\n"
+            "VPN\n"
             "---\n\n"
-            f"Conversación:\n{conversation_text}"
+
+            f"CONVERSACIÓN A ANALIZAR:\n{conversation_text}"
         )
 
-        return await self._llm.generate([{"role": "user", "content": prompt}])
+        raw = await self._llm.generate([{"role": "user", "content": prompt}])
+        return self._parse_ticket_response(raw)
 
     def _filter_chunks(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         return [c for c in chunks if c.score >= self._settings.retrieval_min_score and c.text.strip()]
@@ -369,3 +406,31 @@ class RAGService:
 
         companions.sort(key=companion_sort_key)
         return companions
+
+    def _parse_ticket_response(self, text: str) -> str:
+        """Valida estructura de ticket y retorna formato uniforme."""
+        sections = {}
+        current_section = None
+
+        for line in text.split("\n"):
+            if line.strip().endswith(":"):
+                current_section = line.strip()[:-1]
+                sections[current_section] = ""
+            elif current_section:
+                sections[current_section] += line + "\n"
+
+        categoria = sections.get("Categoría", "").strip()
+        valid_categorias = ["Bug", "Configuración", "Acceso", "VPN", "Rendimiento", "Otro"]
+
+        if categoria not in valid_categorias:
+            categoria = "Otro"
+
+        formatted = (
+            f"Problema Principal:\n{sections.get('Problema Principal', '').strip()}\n\n"
+            f"Pasos Reproducidos:\n{sections.get('Pasos Reproducidos', '').strip()}\n\n"
+            f"Intentos de Resolución:\n{sections.get('Intentos de Resolución', '').strip()}\n\n"
+            f"Comportamiento Esperado vs Real:\n{sections.get('Comportamiento Esperado vs Real', '').strip()}\n\n"
+            f"Categoría:\n{categoria}"
+        )
+
+        return formatted

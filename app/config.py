@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str | None = None
-    redis_ttl_seconds: int = 3600
-    share_ttl_seconds: int = 3600
+    redis_ttl_seconds: int = 604800  # 7 días
+    share_ttl_seconds: int = 604800  # 7 días
 
     # Qdrant
     qdrant_host: str = "qdrant-rag"
@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     ollama_timeout: int = 120
     ollama_num_ctx: int = 8192
 
+    # LLM sampling — perfil generación (chat al usuario + ticket)
+    llm_temperature: float = 0.2
+    llm_top_p: float = 0.8
+    llm_top_k: int = 20
+    llm_repeat_penalty: float = 1.05
+    llm_presence_penalty: float = 0.3
+    llm_num_predict: int = 1024
+    llm_think: bool = False  # thinking off: mejor time-to-first-token en streaming
+
+    # LLM sampling — perfil interno (query rewrite/expansion: casi determinista)
+    llm_internal_temperature: float = 0.1
+    llm_internal_num_predict: int = 256
+
     # RAG Ingestion Service (interno)
     ingestion_service_url: str
     ingestion_timeout: int = 30
@@ -45,7 +58,6 @@ class Settings(BaseSettings):
     # RAG
     max_context_chars: int = 12000
     max_context_tokens: int = 3000  # límite de tokens del contexto para el LLM
-    max_history_messages: int = 6
 
     # Query rewriting
     query_rewrite_enabled: bool = True

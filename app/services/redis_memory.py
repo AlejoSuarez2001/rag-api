@@ -17,7 +17,6 @@ class RedisMemory:
         )
         self._ttl = settings.redis_ttl_seconds
         self._share_ttl = settings.share_ttl_seconds
-        self._max_messages = settings.max_history_messages
 
     async def get_history(self, conversation_id: str) -> ConversationHistory:
         raw = await self._client.get(self._key(conversation_id))
@@ -43,8 +42,6 @@ class RedisMemory:
         history.messages.append(Message(role="user", content=question))
         history.messages.append(Message(role="assistant", content=answer, sources=sources or [], no_info=no_info))
 
-        # Keep only the last N messages to avoid token bloat
-        history.messages = history.messages[-self._max_messages :]
         history.updated_at = datetime.now(timezone.utc).isoformat()
 
         await self._client.setex(
