@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     redis_ttl_seconds: int = 604800  # 7 días
     share_ttl_seconds: int = 604800  # 7 días
 
+    # PostgreSQL (persistencia de feedback de usuarios)
+    # Container name del stack de ingestion, alcanzable vía traefik-net (igual que qdrant-rag)
+    postgres_host: str = "postgres-rag"
+    postgres_port: int = 5432
+    postgres_db: str = "rag_ingestion"
+    postgres_user: str = "rag"
+    postgres_password: str = "rag"
+    postgres_pool_min: int = 1
+    postgres_pool_max: int = 5
+
     # Qdrant
     qdrant_host: str = "qdrant-rag"
     qdrant_port: int = 6333

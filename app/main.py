@@ -15,7 +15,20 @@ async def lifespan(app: FastAPI):
     from app.services.retrieval_service import RetrievalService
     retrieval = RetrievalService(settings)
     await retrieval.validate_collection_dimensions(settings.embedding_dimensions)
+
+    # Pool de Postgres para feedback. Si falla, no tumbamos el chat:
+    # los endpoints de feedback responderán 503 hasta que la DB esté disponible.
+    from app.services.feedback_repository import FeedbackRepository
+    app.state.feedback_repo = None
+    try:
+        app.state.feedback_repo = await FeedbackRepository.connect(settings)
+    except Exception:
+        logger.exception("No se pudo inicializar el pool de Postgres para feedback")
+
     yield
+
+    if app.state.feedback_repo is not None:
+        await app.state.feedback_repo.close()
 
 
 settings = get_settings()

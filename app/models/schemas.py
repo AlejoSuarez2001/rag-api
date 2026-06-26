@@ -1,3 +1,4 @@
+from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -53,3 +54,65 @@ class RetrievedChunk(BaseModel):
     chunk_id: Optional[str] = None
     title: Optional[str] = None
     position: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Feedback de usuarios sobre respuestas del asistente
+# ---------------------------------------------------------------------------
+
+class FeedbackCategory(str, Enum):
+    """Taxonomía de problemas comunes en respuestas RAG.
+
+    Permite distinguir fallos de recuperación (retrieval) de fallos de
+    generación al analizar el feedback agregado.
+    """
+    INFO_INCORRECTA = "info_incorrecta"        # alucinación / dato inventado
+    NO_ENCONTRO = "no_encontro"                # info existe pero no la recuperó
+    IRRELEVANTE = "irrelevante"                # no responde lo preguntado
+    FUENTE_INCORRECTA = "fuente_incorrecta"    # cita mal / fuente ruidosa
+    DESACTUALIZADA = "desactualizada"          # doc viejo en el índice
+    FORMATO = "formato"                        # formato o idioma
+    OTRO = "otro"
+
+
+class FeedbackCreate(BaseModel):
+    conversation_id: str = Field(..., min_length=1, max_length=128)
+    rating: int = Field(..., ge=-1, le=1, description="1 = positivo (👍), -1 = negativo (👎)")
+    categories: list[FeedbackCategory] = Field(default_factory=list)
+    comment: Optional[str] = Field(None, max_length=2000)
+    # Snapshot del contexto: el historial de Redis expira, esto no.
+    question: str = Field(..., min_length=1)
+    answer: str = Field(..., min_length=1)
+    sources: list[str] = Field(default_factory=list)
+    no_info: bool = False
+
+
+class FeedbackRecord(BaseModel):
+    id: int
+    created_at: str
+    conversation_id: str
+    username: Optional[str] = None
+    rating: int
+    categories: list[str] = Field(default_factory=list)
+    comment: Optional[str] = None
+    question: str
+    answer: str
+    sources: list[str] = Field(default_factory=list)
+    no_info: bool = False
+    model: Optional[str] = None
+
+
+class FeedbackCreatedResponse(BaseModel):
+    id: int
+
+
+class FeedbackListResponse(BaseModel):
+    total: int
+    items: list[FeedbackRecord]
+
+
+class FeedbackStats(BaseModel):
+    total: int
+    positive: int
+    negative: int
+    by_category: dict[str, int]

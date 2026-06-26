@@ -37,6 +37,11 @@ async def list_conversations(
     summaries = []
     for cid in conversation_ids:
         history = await memory.get_history(cid)
+        if not history.messages:
+            # ID huérfano: la conversación ya expiró por TTL pero quedó en el índice.
+            # Lo quitamos para que el listado se auto-limpie.
+            await memory.discard_conversation(username, cid)
+            continue
         first_assistant = next(
             (m.content for m in history.messages if m.role == "assistant"), None
         )

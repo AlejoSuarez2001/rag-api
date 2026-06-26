@@ -112,3 +112,4 @@ def require_ingestion_role(*allowed_roles: str):
 
 
 require_ingestion_admin = require_ingestion_role("ROLE_INGESTION_ADMIN")
+require_feedback_admin = require_ingestion_role("ROLE_FEEDBACK_ADMIN")

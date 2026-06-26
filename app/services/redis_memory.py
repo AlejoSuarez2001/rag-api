@@ -93,6 +93,10 @@ class RedisMemory:
         members = await self._client.smembers(self._user_key(username))
         return list(members)
 
+    async def discard_conversation(self, username: str, conversation_id: str) -> None:
+        """Quita un ID huérfano (cuya data ya expiró por TTL) del índice del usuario."""
+        await self._client.srem(self._user_key(username), conversation_id)
+
     async def clear(self, conversation_id: str) -> None:
         await self._client.delete(self._key(conversation_id))
 
