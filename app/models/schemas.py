@@ -118,3 +118,32 @@ class FeedbackStats(BaseModel):
     positive: int
     negative: int
     by_category: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
+# Gaps de documentación (consultas que dispararon [SIN_INFO])
+# ---------------------------------------------------------------------------
+
+class GapRecord(BaseModel):
+    id: int
+    created_at: str
+    conversation_id: str
+    username: Optional[str] = None
+    question: str
+    standalone_query: str
+    model: Optional[str] = None
+
+
+class GapListResponse(BaseModel):
+    total: int
+    items: list[GapRecord]
+
+
+class GapTopQuery(BaseModel):
+    query: str
+    count: int
+
+
+class GapStats(BaseModel):
+    total: int
+    top: list[GapTopQuery]

@@ -7,6 +7,7 @@ import httpx
 from pydantic import ValidationError
 from app.config import Settings
 from app.models.schemas import ChatResponse, ConversationHistory, RetrievedChunk
+from app.services.gap_repository import GapRepository
 from app.services.llm_service import LLMService
 from app.services.query_rewriter import QueryRewriter
 from app.services.reranker import Reranker
@@ -21,20 +22,6 @@ _CHITCHAT_MARKER = "[CHARLA]"
 _CLARIFY_MARKER = "[ACLARAR]"
 # Cuántos chars hay que bufferear en streaming antes de poder decidir el marcador.
 _MAX_MARKER_LEN = max(len(_NO_INFO_MARKER), len(_CHITCHAT_MARKER), len(_CLARIFY_MARKER))
-
-_NO_INFO_PHRASES = (
-    "no tengo información",
-    "no cuento con información",
-    "no cuento con esa información",
-    "no dispongo de información",
-    "no encuentro información",
-    "no tengo datos",
-    "no tengo suficiente información",
-    "información suficiente para responder",
-    "no puedo responder",
-    "no está en mi información",
-    "no tengo info",
-)
 
 
 _FOLLOWUP_PROMPT = """Basándote en la conversación y en los temas disponibles en la documentación, \
@@ -83,8 +70,7 @@ Respondé ÚNICAMENTE con un JSON array. Si es aclaración, ejemplo: \
 
 
 def _parse_markers(text: str) -> tuple[str, bool, bool, bool]:
-    """Returns (clean_text, no_info, chitchat, clarify). El marcador inicial tiene prioridad;
-    las frases keyword son fallback para no_info."""
+    """Returns (clean_text, no_info, chitchat, clarify) según el marcador inicial."""
     stripped = text.lstrip()
     if stripped.startswith(_NO_INFO_MARKER):
         return stripped[len(_NO_INFO_MARKER):].lstrip(), True, False, False
@@ -92,9 +78,7 @@ def _parse_markers(text: str) -> tuple[str, bool, bool, bool]:
         return stripped[len(_CHITCHAT_MARKER):].lstrip(), False, True, False
     if stripped.startswith(_CLARIFY_MARKER):
         return stripped[len(_CLARIFY_MARKER):].lstrip(), False, False, True
-    lower = text.lower()
-    no_info = any(phrase in lower for phrase in _NO_INFO_PHRASES)
-    return text, no_info, False, False
+    return text, False, False, False
 
 
 class RAGService:
@@ -222,7 +206,7 @@ class RAGService:
 
     async def chat_stream(
         self, conversation_id: str, question: str, username: str | None = None,
-        regenerate: bool = False,
+        regenerate: bool = False, gap_repo: GapRepository | None = None,
     ) -> AsyncIterator[str]:
         """Same pipeline as chat() but streams the LLM response token by token via SSE."""
         try:
@@ -345,6 +329,21 @@ class RAGService:
                 if title:
                     await self._memory.set_title(conversation_id, title)
                     yield f"data: {json.dumps({'title': title})}\n\n"
+
+            # Gap de documentación: si la respuesta fue [SIN_INFO], la consulta es una
+            # pregunta real no cubierta. Se persiste al final (no agrega latencia a los
+            # eventos del usuario) y nunca rompe el stream. No se registra en regenerate.
+            if no_info and not regenerate and gap_repo is not None:
+                try:
+                    await gap_repo.insert(
+                        conversation_id=conversation_id,
+                        username=username,
+                        question=question,
+                        standalone_query=standalone_query,
+                        model=self._settings.ollama_model,
+                    )
+                except Exception:
+                    logger.warning("No se pudo persistir el gap de documentación", exc_info=True)
 
         except ValidationError as exc:
             logger.error("Validation error in chat_stream: %s", exc)

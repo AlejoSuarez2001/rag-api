@@ -25,10 +25,21 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("No se pudo inicializar el pool de Postgres para feedback")
 
+    # Pool de Postgres para gaps de documentación ([SIN_INFO]). Mismo criterio:
+    # si falla, no tumbamos el chat; el dashboard responderá 503 hasta que la DB esté.
+    from app.services.gap_repository import GapRepository
+    app.state.gap_repo = None
+    try:
+        app.state.gap_repo = await GapRepository.connect(settings)
+    except Exception:
+        logger.exception("No se pudo inicializar el pool de Postgres para doc_gaps")
+
     yield
 
     if app.state.feedback_repo is not None:
         await app.state.feedback_repo.close()
+    if app.state.gap_repo is not None:
+        await app.state.gap_repo.close()
 
 
 settings = get_settings()

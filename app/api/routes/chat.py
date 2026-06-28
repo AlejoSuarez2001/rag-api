@@ -9,6 +9,7 @@ from app.config import Settings, get_settings
 from app.models.schemas import ChatRequest, ChatResponse
 from app.security import get_current_token_payload
 from app.services.feedback_repository import FeedbackRepository
+from app.services.gap_repository import GapRepository
 from app.services.rag_service import RAGService
 
 router = APIRouter(
@@ -23,6 +24,10 @@ def get_rag_service(settings: Settings = Depends(get_settings)) -> RAGService:
 
 def get_feedback_repository_optional(request: Request) -> FeedbackRepository | None:
     return getattr(request.app.state, "feedback_repo", None)
+
+
+def get_gap_repository_optional(request: Request) -> GapRepository | None:
+    return getattr(request.app.state, "gap_repo", None)
 
 
 @router.post(
@@ -78,6 +83,7 @@ async def chat_stream(
     payload: dict[str, Any] = Depends(get_current_token_payload),
     rag: RAGService = Depends(get_rag_service),
     feedback_repo: FeedbackRepository | None = Depends(get_feedback_repository_optional),
+    gap_repo: GapRepository | None = Depends(get_gap_repository_optional),
 ) -> StreamingResponse:
     username: str | None = payload.get("preferred_username")
     if request.regenerate and feedback_repo is not None:
@@ -89,6 +95,7 @@ async def chat_stream(
             question=request.question,
             username=username,
             regenerate=request.regenerate,
+            gap_repo=gap_repo,
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
