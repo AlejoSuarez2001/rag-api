@@ -1,13 +1,14 @@
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.models.schemas import ChatRequest, ChatResponse
 from app.security import get_current_token_payload
+from app.services.feedback_repository import FeedbackRepository
 from app.services.rag_service import RAGService
 
 router = APIRouter(
@@ -18,6 +19,10 @@ router = APIRouter(
 
 def get_rag_service(settings: Settings = Depends(get_settings)) -> RAGService:
     return RAGService(settings)
+
+
+def get_feedback_repository_optional(request: Request) -> FeedbackRepository | None:
+    return getattr(request.app.state, "feedback_repo", None)
 
 
 @router.post(
@@ -72,13 +77,18 @@ async def chat_stream(
     request: ChatRequest,
     payload: dict[str, Any] = Depends(get_current_token_payload),
     rag: RAGService = Depends(get_rag_service),
+    feedback_repo: FeedbackRepository | None = Depends(get_feedback_repository_optional),
 ) -> StreamingResponse:
     username: str | None = payload.get("preferred_username")
+    if request.regenerate and feedback_repo is not None:
+        # El voto previo apuntaba a una respuesta que vamos a descartar: lo borramos.
+        await feedback_repo.delete_for_exchange(request.conversation_id, request.question)
     return StreamingResponse(
         rag.chat_stream(
             conversation_id=request.conversation_id,
             question=request.question,
             username=username,
+            regenerate=request.regenerate,
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},

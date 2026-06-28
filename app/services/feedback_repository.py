@@ -75,26 +75,59 @@ class FeedbackRepository:
         username: Optional[str],
         model: Optional[str],
     ) -> int:
-        row = await self._pool.fetchrow(
-            """
-            INSERT INTO feedback
-                (conversation_id, username, rating, categories, comment,
-                 question, answer, sources, no_info, model)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING id
-            """,
-            feedback.conversation_id,
-            username,
-            feedback.rating,
-            [c.value for c in feedback.categories],
-            feedback.comment,
-            feedback.question,
-            feedback.answer,
-            json.dumps(feedback.sources),
-            feedback.no_info,
-            model,
-        )
+        # Un intercambio se identifica por (conversation_id, question). Borramos cualquier
+        # feedback previo de ese intercambio antes de insertar: "el último gana" e idempotente,
+        # así un reenvío no genera filas duplicadas.
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM feedback WHERE conversation_id = $1 AND question = $2",
+                    feedback.conversation_id,
+                    feedback.question,
+                )
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO feedback
+                        (conversation_id, username, rating, categories, comment,
+                         question, answer, sources, no_info, model)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    RETURNING id
+                    """,
+                    feedback.conversation_id,
+                    username,
+                    feedback.rating,
+                    [c.value for c in feedback.categories],
+                    feedback.comment,
+                    feedback.question,
+                    feedback.answer,
+                    json.dumps(feedback.sources),
+                    feedback.no_info,
+                    model,
+                )
         return row["id"]
+
+    async def delete_for_exchange(self, conversation_id: str, question: str) -> None:
+        """Borra el feedback de un intercambio. Se usa al regenerar la respuesta: el snapshot
+        guardado deja de ser válido, así que el voto previo no debe heredarse."""
+        await self._pool.execute(
+            "DELETE FROM feedback WHERE conversation_id = $1 AND question = $2",
+            conversation_id,
+            question,
+        )
+
+    async def ratings_for_conversation(self, conversation_id: str) -> dict[str, int]:
+        """Devuelve {question: rating} con el feedback vigente de cada intercambio de la
+        conversación, para que el frontend pueda marcar los botones ya votados al recargar."""
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (question) question, rating
+            FROM feedback
+            WHERE conversation_id = $1
+            ORDER BY question, created_at DESC
+            """,
+            conversation_id,
+        )
+        return {r["question"]: r["rating"] for r in rows}
 
     async def list(
         self,

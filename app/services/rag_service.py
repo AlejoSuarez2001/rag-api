@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 
 _NO_INFO_MARKER = "[SIN_INFO]"
 _CHITCHAT_MARKER = "[CHARLA]"
+_CLARIFY_MARKER = "[ACLARAR]"
 # Cuántos chars hay que bufferear en streaming antes de poder decidir el marcador.
-_MAX_MARKER_LEN = max(len(_NO_INFO_MARKER), len(_CHITCHAT_MARKER))
+_MAX_MARKER_LEN = max(len(_NO_INFO_MARKER), len(_CHITCHAT_MARKER), len(_CLARIFY_MARKER))
 
 _NO_INFO_PHRASES = (
     "no tengo información",
@@ -62,17 +63,38 @@ Asistente: {answer}
 Respondé ÚNICAMENTE con el título."""
 
 
-def _parse_markers(text: str) -> tuple[str, bool, bool]:
-    """Returns (clean_text, no_info, chitchat). El marcador inicial tiene prioridad;
+_CLARIFICATION_PROMPT = """Analizá la respuesta de un asistente y detectá si le está pidiendo al \
+usuario que ACLARE a qué se refiere, porque su consulta era ambigua y podría apuntar a varios \
+servicios o temas distintos.
+
+Si es una pregunta de aclaración que ofrece varias opciones, devolvé cada opción como {{"label", "query"}}:
+- "label": cómo lo diría el usuario, MUY corto (1-3 palabras), nombrando el SISTEMA o SERVICIO. \
+Ejemplos BUENOS: "Wi-Fi", "Office 365", "VPN", "Guaraní".
+- "query": la consulta reformulada y autocontenida para esa opción, en el idioma del usuario.
+
+Si la respuesta NO es una aclaración (responde directamente, saluda, o dice que no tiene \
+información), devolvé [].
+
+Respuesta del asistente:
+{answer}
+
+Respondé ÚNICAMENTE con un JSON array. Si es aclaración, ejemplo: \
+[{{"label": "Wi-Fi", "query": "cómo me conecto al Wi-Fi de la facultad"}}]. Si no lo es: []"""
+
+
+def _parse_markers(text: str) -> tuple[str, bool, bool, bool]:
+    """Returns (clean_text, no_info, chitchat, clarify). El marcador inicial tiene prioridad;
     las frases keyword son fallback para no_info."""
     stripped = text.lstrip()
     if stripped.startswith(_NO_INFO_MARKER):
-        return stripped[len(_NO_INFO_MARKER):].lstrip(), True, False
+        return stripped[len(_NO_INFO_MARKER):].lstrip(), True, False, False
     if stripped.startswith(_CHITCHAT_MARKER):
-        return stripped[len(_CHITCHAT_MARKER):].lstrip(), False, True
+        return stripped[len(_CHITCHAT_MARKER):].lstrip(), False, True, False
+    if stripped.startswith(_CLARIFY_MARKER):
+        return stripped[len(_CLARIFY_MARKER):].lstrip(), False, False, True
     lower = text.lower()
     no_info = any(phrase in lower for phrase in _NO_INFO_PHRASES)
-    return text, no_info, False
+    return text, no_info, False, False
 
 
 class RAGService:
@@ -174,11 +196,11 @@ class RAGService:
 
         # 7. Call LLM
         raw_answer = await self._llm.generate(messages, log_request=True)
-        answer, no_info, chitchat = _parse_markers(raw_answer)
+        answer, no_info, chitchat, clarify = _parse_markers(raw_answer)
 
         # 8. Collect unique sources — solo si la respuesta se apoya en la documentación
-        #    (un saludo/charla o un "sin info" no debe mostrar fuentes)
-        grounded = not no_info and not chitchat
+        #    (un saludo/charla, un "sin info" o una aclaración no debe mostrar fuentes)
+        grounded = not no_info and not chitchat and not clarify
         sources = list(dict.fromkeys(c.source for c in chunks)) if grounded else []
 
         # 9. Persist turn to Redis
@@ -199,10 +221,17 @@ class RAGService:
         return ChatResponse(answer=answer, sources=sources, no_info=no_info)
 
     async def chat_stream(
-        self, conversation_id: str, question: str, username: str | None = None
+        self, conversation_id: str, question: str, username: str | None = None,
+        regenerate: bool = False,
     ) -> AsyncIterator[str]:
         """Same pipeline as chat() but streams the LLM response token by token via SSE."""
         try:
+            if regenerate:
+                # Descartamos el último turno; la pregunta a regenerar es la de ese turno.
+                popped = await self._memory.pop_last_turn(conversation_id)
+                if popped:
+                    question = popped
+
             history = await self._memory.get_history(conversation_id)
             is_first_turn = len(history.messages) == 0
 
@@ -275,7 +304,7 @@ class RAGService:
                     buffer += token
                     if len(buffer) >= _MAX_MARKER_LEN:
                         marker_checked = True
-                        buffer, _, _ = _parse_markers(buffer)
+                        buffer, _, _, _ = _parse_markers(buffer)
                         if buffer:
                             yield f"data: {json.dumps({'token': buffer})}\n\n"
                 else:
@@ -283,12 +312,12 @@ class RAGService:
 
             # Flush buffer if stream ended before we had enough chars to check
             if not marker_checked and buffer:
-                buffer, _, _ = _parse_markers(buffer)
+                buffer, _, _, _ = _parse_markers(buffer)
                 if buffer:
                     yield f"data: {json.dumps({'token': buffer})}\n\n"
 
-            clean_answer, no_info, chitchat = _parse_markers(full_answer)
-            grounded = not no_info and not chitchat
+            clean_answer, no_info, chitchat, clarify = _parse_markers(full_answer)
+            grounded = not no_info and not chitchat and not clarify
             sources = list(dict.fromkeys(c.source for c in chunks)) if grounded else []
             await self._memory.add_turn(
                 conversation_id=conversation_id,
@@ -301,9 +330,11 @@ class RAGService:
 
             yield f"data: {json.dumps({'done': True, 'sources': sources, 'no_info': no_info})}\n\n"
 
-            # Sugerencias de seguimiento: llamado extra y barato DESPUÉS de mostrar la
-            # respuesta. Solo si la respuesta se apoyó en documentación. Fallback a [].
-            if grounded:
+            if clarify:
+                alternatives = await self.detect_clarification(clean_answer)
+                if alternatives:
+                    yield f"data: {json.dumps({'alternatives': alternatives})}\n\n"
+            elif grounded:
                 suggestions = await self.generate_followups(question, clean_answer, chunks)
                 if suggestions:
                     yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
@@ -380,6 +411,35 @@ class RAGService:
             return cleaned[:1]
         except Exception:
             logger.warning("Follow-up generation failed", exc_info=True)
+            return []
+
+    async def detect_clarification(self, answer: str) -> list[dict]:
+        """Si la respuesta del modelo fue una pregunta de aclaración que ofrece varias opciones,
+        las extrae como {label, query} para mostrarlas como chips. [] si la respuesta fue directa
+        o ante cualquier error (fallback silencioso). Corre post-respuesta, así que no penaliza el
+        time-to-first-token."""
+        prompt = _CLARIFICATION_PROMPT.format(answer=answer[:1500])
+        try:
+            raw = await self._llm.generate(
+                [{"role": "user", "content": prompt}],
+                options=self._llm.internal_options,
+            )
+            start = raw.find("[")
+            end = raw.rfind("]") + 1
+            if start == -1 or end == 0:
+                return []
+            parsed = json.loads(raw[start:end])
+            result: list[dict] = []
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                label = str(item.get("label", "")).strip()
+                query = str(item.get("query", "")).strip()
+                if label and query:
+                    result.append({"label": label, "query": query})
+            return result[: self._settings.max_clarification_options]
+        except Exception:
+            logger.warning("Clarification detection failed", exc_info=True)
             return []
 
     async def generate_ticket_description(self, conversation_id: str) -> str:

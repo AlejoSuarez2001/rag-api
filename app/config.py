@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     query_expansion_enabled: bool = True
     query_expansion_count: int = 3
 
+    max_clarification_options: int = 6
+
     # Reranking (vía HTTP remoto)
     reranker_enabled: bool = True
     reranker_url: str

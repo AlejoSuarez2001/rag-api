@@ -55,6 +55,30 @@ class RedisMemory:
             await self._client.sadd(user_key, conversation_id)
             await self._client.expire(user_key, self._ttl)
 
+    async def pop_last_turn(self, conversation_id: str) -> str | None:
+        """Quita el último turno (assistant + el user previo) y devuelve la pregunta de ese
+        user, para poder regenerar la respuesta con el contexto previo intacto. Devuelve None
+        si no hay nada que popear."""
+        history = await self.get_history(conversation_id)
+        msgs = history.messages
+        if not msgs:
+            return None
+        if msgs[-1].role == "assistant":
+            msgs.pop()
+        question: str | None = None
+        if msgs and msgs[-1].role == "user":
+            question = msgs[-1].content
+            msgs.pop()
+        history.updated_at = datetime.now(timezone.utc).isoformat()
+        # Mantenemos la key viva (preserva título) aunque quede sin mensajes: el add_turn de la
+        # regeneración la vuelve a poblar inmediatamente.
+        await self._client.setex(
+            self._key(conversation_id),
+            self._ttl,
+            history.model_dump_json(),
+        )
+        return question
+
     async def set_title(self, conversation_id: str, title: str) -> None:
         history = await self.get_history(conversation_id)
         if not history.messages:

@@ -6,6 +6,7 @@ from typing import Optional
 class ChatRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=128, description="Unique conversation identifier")
     question: str = Field(..., min_length=1, max_length=2000, description="User question")
+    regenerate: bool = Field(False, description="Si true, descarta la última respuesta del historial y la vuelve a generar")
 
 
 class ChatResponse(BaseModel):
@@ -19,6 +20,7 @@ class Message(BaseModel):
     content: str
     sources: list[str] = Field(default_factory=list)
     no_info: bool = False
+    rating: Optional[int] = None
 
 
 class ConversationHistory(BaseModel):

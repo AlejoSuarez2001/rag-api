@@ -1,10 +1,11 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.config import Settings, get_settings
 from app.models.schemas import ConversationHistory, ConversationListResponse, ConversationSummary
 from app.security import get_current_token_payload
+from app.services.feedback_repository import FeedbackRepository
 from app.services.redis_memory import RedisMemory
 
 router = APIRouter(
@@ -15,6 +16,11 @@ router = APIRouter(
 
 def get_redis_memory(settings: Settings = Depends(get_settings)) -> RedisMemory:
     return RedisMemory(settings)
+
+
+def get_feedback_repository_optional(request: Request) -> FeedbackRepository | None:
+    # Opcional: si Postgres no está disponible, la conversación igual se carga (sin marcas de feedback).
+    return getattr(request.app.state, "feedback_repo", None)
 
 
 @router.get(
@@ -68,6 +74,7 @@ async def get_conversation(
     conversation_id: str,
     payload: dict[str, Any] = Depends(get_current_token_payload),
     memory: RedisMemory = Depends(get_redis_memory),
+    feedback_repo: FeedbackRepository | None = Depends(get_feedback_repository_optional),
 ) -> ConversationHistory:
     username: str | None = payload.get("preferred_username")
     history = await memory.get_history(conversation_id)
@@ -83,5 +90,14 @@ async def get_conversation(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes acceso a esta conversación.",
         )
+
+    if feedback_repo is not None:
+        ratings = await feedback_repo.ratings_for_conversation(conversation_id)
+        last_question: str | None = None
+        for m in history.messages:
+            if m.role == "user":
+                last_question = m.content
+            elif m.role == "assistant" and last_question is not None:
+                m.rating = ratings.get(last_question)
 
     return history
