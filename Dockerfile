@@ -10,4 +10,6 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# El entrypoint corre `alembic upgrade head` antes de levantar uvicorn.
+# Se invoca con `sh` para no depender del bit +x (en dev el bind-mount pisa permisos).
+CMD ["sh", "entrypoint.sh"]

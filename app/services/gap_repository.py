@@ -9,26 +9,13 @@ from app.models.schemas import GapRecord, GapStats, GapTopQuery
 logger = logging.getLogger(__name__)
 
 
-_CREATE_TABLE = """
-    CREATE TABLE IF NOT EXISTS doc_gaps (
-        id               BIGSERIAL PRIMARY KEY,
-        created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-        conversation_id  TEXT        NOT NULL,
-        username         TEXT,
-        question         TEXT        NOT NULL,
-        standalone_query TEXT        NOT NULL,
-        model            TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_doc_gaps_created ON doc_gaps (created_at DESC);
-"""
-
-
 class GapRepository:
     """Persistencia de gaps de documentación en PostgreSQL.
 
     Cada gap es una consulta real que disparó [SIN_INFO]: la base de conocimiento
     no la cubre. Se guarda acá (el historial de Redis expira a los 7 días) para que
-    los admins puedan ver qué documentar a continuación.
+    los admins puedan ver qué documentar a continuación. El esquema (tabla
+    `analytics.doc_gaps`) lo gestiona Alembic; este repositorio solo consulta.
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -44,9 +31,10 @@ class GapRepository:
             password=settings.postgres_password,
             min_size=settings.postgres_pool_min,
             max_size=settings.postgres_pool_max,
+            # Las tablas viven en el schema `analytics` (gestionado por Alembic).
+            # Fijamos search_path para que las queries resuelvan sin calificar.
+            server_settings={"search_path": settings.db_schema},
         )
-        async with pool.acquire() as conn:
-            await conn.execute(_CREATE_TABLE)
         logger.info(
             "GapRepository conectado a Postgres %s:%s/%s",
             settings.postgres_host,

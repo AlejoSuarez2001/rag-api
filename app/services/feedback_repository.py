@@ -14,32 +14,13 @@ from app.models.schemas import (
 logger = logging.getLogger(__name__)
 
 
-_CREATE_TABLE = """
-    CREATE TABLE IF NOT EXISTS feedback (
-        id              BIGSERIAL PRIMARY KEY,
-        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-        conversation_id TEXT        NOT NULL,
-        username        TEXT,
-        rating          SMALLINT    NOT NULL,
-        categories      TEXT[]      NOT NULL DEFAULT '{}',
-        comment         TEXT,
-        question        TEXT        NOT NULL,
-        answer          TEXT        NOT NULL,
-        sources         JSONB       NOT NULL DEFAULT '[]',
-        no_info         BOOLEAN     NOT NULL DEFAULT FALSE,
-        model           TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_feedback_rating  ON feedback (rating);
-"""
-
-
 class FeedbackRepository:
     """Persistencia de feedback de usuarios en PostgreSQL.
 
     Mantiene un snapshot completo (pregunta, respuesta, fuentes) porque el
     historial en Redis expira a los 7 días y el reporte debe sobrevivir para
-    análisis posterior.
+    análisis posterior. El esquema (tabla `analytics.feedback`) lo gestiona Alembic;
+    este repositorio solo consulta.
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -55,9 +36,10 @@ class FeedbackRepository:
             password=settings.postgres_password,
             min_size=settings.postgres_pool_min,
             max_size=settings.postgres_pool_max,
+            # Las tablas viven en el schema `analytics` (gestionado por Alembic).
+            # Fijamos search_path para que las queries resuelvan sin calificar.
+            server_settings={"search_path": settings.db_schema},
         )
-        async with pool.acquire() as conn:
-            await conn.execute(_CREATE_TABLE)
         logger.info(
             "FeedbackRepository conectado a Postgres %s:%s/%s",
             settings.postgres_host,

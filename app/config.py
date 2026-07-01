@@ -31,6 +31,20 @@ class Settings(BaseSettings):
     postgres_password: str = "rag"
     postgres_pool_min: int = 1
     postgres_pool_max: int = 5
+    # Schema propio de rag-api dentro de la base compartida (separa sus tablas de
+    # las del servicio de ingesta). El runtime fija search_path acá; Alembic lo crea.
+    db_schema: str = "analytics"
+
+    @property
+    def sync_database_url(self) -> str:
+        """DSN sync (psycopg2) que usa Alembic para correr migraciones.
+
+        El runtime de la app NO usa esto: cada repositorio abre su pool asyncpg.
+        """
+        return (
+            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
 
     # Qdrant
     qdrant_host: str = "qdrant-rag"

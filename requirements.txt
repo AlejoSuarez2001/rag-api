@@ -17,6 +17,13 @@ redis==5.0.4
 # Feedback persistence (PostgreSQL)
 asyncpg==0.29.0
 
+# ORM (modelado de esquema) + migraciones
+# Las queries siguen en asyncpg; SQLModel es la fuente de verdad del esquema y
+# Alembic versiona los cambios. psycopg2 es el driver sync que usa Alembic.
+sqlmodel==0.0.22
+alembic==1.13.2
+psycopg2-binary==2.9.9
+
 # Token counting
 tiktoken==0.7.0
 
